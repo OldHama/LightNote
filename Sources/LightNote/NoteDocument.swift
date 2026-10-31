@@ -23,7 +23,7 @@ enum InkTool {
 }
 
 @MainActor
-final class NoteState: ObservableObject {
+final class NoteState: NSObject, ObservableObject {
     static let eraserRadius: CGFloat = 6
     var refreshCursor: (() -> Void)?
     var invalidateStrokeCache: ((Set<UUID>) -> Void)?
@@ -34,16 +34,7 @@ final class NoteState: ObservableObject {
         self.tool = tool
         refreshCursor?()
     }
-    static let colorPresets: [(key: String, name: String, color: InkColor)] = [
-        ("1", "검정", .black), ("2", "파랑", .blue),
-        ("3", "빨강", .red), ("4", "초록", .green),
-        ("5", "주황", InkColor(0.95, 0.43, 0.08)),
-        ("6", "노랑", InkColor(0.85, 0.65, 0.02)),
-        ("7", "보라", InkColor(0.52, 0.25, 0.78)),
-        ("8", "분홍", InkColor(0.88, 0.27, 0.53)),
-        ("9", "갈색", InkColor(0.48, 0.30, 0.18)),
-        ("0", "회색", InkColor(0.45, 0.48, 0.52))
-    ]
+    static var colorPresets: [(key: String, name: String, color: InkColor)] { AppPreferences.shared.colorPresets }
     @Published var color: InkColor = .black
     static let penWidths: [Double] = [0.5, 1.0, 1.5, 2.0, 3.0]
     @Published var width: Double = 1.5
@@ -65,6 +56,19 @@ final class NoteState: ObservableObject {
     var finishInput: (() -> Void)?
     var invalidate: ((CGRect?) -> Void)?
     weak var document: NoteDocument?
+    var refreshAppearance: (() -> Void)?
+    override init() {
+        super.init()
+        let preferences = AppPreferences.shared
+        color = preferences.penColor; width = preferences.penWidth; note.paperStyle = preferences.defaultPaper
+        NotificationCenter.default.addObserver(self, selector: #selector(preferencesChanged(_:)),
+            name: AppPreferences.changed, object: preferences)
+    }
+    @objc private func preferencesChanged(_ notification: Notification) {
+        let kind = notification.userInfo?["kind"] as? String
+        if kind == "pen" { color = AppPreferences.shared.penColor; width = AppPreferences.shared.penWidth }
+        if kind == "paper" { refreshAppearance?() }
+    }
     func refresh() {
         strokeCount = note.strokes.count
         canUndo = document?.undoManager?.canUndo ?? false

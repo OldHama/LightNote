@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 @preconcurrency import Sparkle
 
 @main
@@ -18,6 +19,7 @@ struct LightNoteMain {
 final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMenuItemValidation {
     private lazy var updaterController = SPUStandardUpdaterController(
         startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
+    private var preferencesController: NSWindowController?
     private var postponedUpdate: (() -> Void)?
     private let documents = LightNoteDocumentController()
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -28,6 +30,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         }
         NSDocumentController.shared.autosavingDelay = 2
         installMenu()
+        NotificationCenter.default.addObserver(self, selector: #selector(updatePreferences(_:)),
+            name: AppPreferences.changed, object: AppPreferences.shared)
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.activate(ignoringOtherApps: true)
@@ -47,8 +51,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         }
         updaterController.startUpdater()
     }
+    @objc func showPreferences(_ sender: Any?) {
+        AppPreferences.shared.syncUpdateSettings(
+            checks: updaterController.updater.automaticallyChecksForUpdates,
+            downloads: updaterController.updater.automaticallyDownloadsUpdates)
+        if preferencesController == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 560),
+                styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+            window.title = "환경설정"
+            window.contentMinSize = NSSize(width: 480, height: 500)
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: PreferencesView())
+            window.center()
+            preferencesController = NSWindowController(window: window)
+        }
+        preferencesController?.showWindow(sender)
+        preferencesController?.window?.makeKeyAndOrderFront(sender)
+    }
+    @objc private func updatePreferences(_ notification: Notification) {
+        guard notification.userInfo?["kind"] as? String == "updates",
+              !CommandLine.arguments.contains("--self-test") else { return }
+        updaterController.updater.automaticallyChecksForUpdates = AppPreferences.shared.automaticChecks
+        updaterController.updater.automaticallyDownloadsUpdates = AppPreferences.shared.automaticDownloads
+    }
     private var activeNote: NoteDocument? {
-        (NSApp.keyWindow?.windowController?.document as? NoteDocument)
+        if let settingsWindow = preferencesController?.window, NSApp.keyWindow === settingsWindow { return nil }
+        return (NSApp.keyWindow?.windowController?.document as? NoteDocument)
             ?? (NSApp.mainWindow?.windowController?.document as? NoteDocument)
             ?? (documents.currentDocument as? NoteDocument)
             ?? documents.documents.compactMap { $0 as? NoteDocument }.last
@@ -123,6 +151,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         }
         let app = submenu("LightNote")
         item(app, "LightNote 정보", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), "")
+        item(app, "환경설정…", #selector(showPreferences(_:)), ",")
+        app.items.last?.target = self
         item(app, "업데이트 확인…", #selector(checkForUpdates(_:)), "")
         app.addItem(.separator())
         item(app, "LightNote 가리기", #selector(NSApplication.hide(_:)), "h")

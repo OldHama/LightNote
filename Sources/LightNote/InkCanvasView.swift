@@ -150,6 +150,7 @@ final class InkCanvasView: NSView {
         self.state = state
         super.init(frame: CGRect(x: 0, y: 0, width: state.note.pageWidth, height: state.note.pageHeight))
         expandWorkspaceToStoredInk()
+        state.refreshAppearance = { [weak self] in self?.needsDisplay = true }
         state.refreshCursor = { [weak self] in
             guard let self else { return }
             if self.state.tool != .selection { self.clearSelection() }
@@ -666,7 +667,7 @@ final class InkCanvasView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         let paperColor = state.note.paperStyle == .grid
-            ? CGColor(srgbRed: 1, green: 0.985, blue: 0.94, alpha: 1)
+            ? AppPreferences.shared.paperColor.cgColor
             : NSColor.white.cgColor
         context.setFillColor(paperColor)
         context.fill(dirtyRect)
@@ -723,12 +724,12 @@ final class InkCanvasView: NSView {
     }
     /// Grid coordinates are anchored to the paper, so scrolling and partial redraws agree.
     private func drawGrid(in dirtyRect: CGRect, context: CGContext) {
-        let spacing: CGFloat = 20
+        let spacing = CGFloat(AppPreferences.shared.gridSpacing)
         let visible = dirtyRect.intersection(bounds)
         guard !visible.isEmpty else { return }
         context.saveGState()
         context.clip(to: visible)
-        context.setStrokeColor(CGColor(srgbRed: 0.78, green: 0.84, blue: 0.91, alpha: 1))
+        context.setStrokeColor(AppPreferences.shared.gridColor.cgColor)
         context.setLineWidth(0.5)
         let path = CGMutablePath()
         for x in stride(from: ceil(visible.minX / spacing) * spacing, through: visible.maxX, by: spacing) {

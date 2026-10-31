@@ -3,6 +3,7 @@ import AppKit
 
 struct EditorView: View {
     @ObservedObject var state: NoteState
+    @ObservedObject private var preferences = AppPreferences.shared
     var body: some View {
         VStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
@@ -56,7 +57,7 @@ struct EditorView: View {
                         Image(systemName: "arrow.up.right")
                             .foregroundStyle(state.tool == .arrow ? Color.accentColor : .secondary)
                     }.help("화살표 · A").accessibilityLabel("화살표")
-                    ForEach(NoteState.colorPresets, id: \.key) { preset in
+                    ForEach(preferences.colorPresets, id: \.key) { preset in
                         Button { state.color = preset.color } label: {
                             Circle().fill(Color(cgColor: preset.color.cgColor)).frame(width: 19, height: 19)
                                 .padding(4)
@@ -112,6 +113,7 @@ struct EditorView: View {
 }
 
 private struct ShortcutHelpView: View {
+    @ObservedObject private var preferences = AppPreferences.shared
     @Environment(\.dismiss) private var dismiss
     private func row(_ keys: String, _ title: String) -> some View {
         HStack(spacing: 18) {
@@ -150,6 +152,7 @@ private struct ShortcutHelpView: View {
                     row("⌘ ⇧ Z", "다시 실행")
                     row("⌫ / Delete", "선택한 획 삭제")
                     row("Esc", "선택 해제 · 도형 취소 · 도움말 닫기")
+                    row("⌘ ,", "환경설정")
                     row("⌘ N", "새 노트")
                     row("⌘ O", "노트 열기")
                     row("⌘ S", "저장 · 평소에는 자동 저장")
@@ -159,7 +162,7 @@ private struct ShortcutHelpView: View {
                     Divider().padding(.vertical, 12)
                     Text("펜 색상").font(.headline).padding(.bottom, 6)
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 12) {
-                        ForEach(NoteState.colorPresets, id: \.key) { preset in
+                        ForEach(preferences.colorPresets, id: \.key) { preset in
                             HStack(spacing: 12) {
                                 Text(preset.key).font(.system(.body, design: .monospaced))
                                 Circle().fill(Color(cgColor: preset.color.cgColor)).frame(width: 12, height: 12)

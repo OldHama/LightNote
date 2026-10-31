@@ -407,6 +407,29 @@ enum AppSelfTest {
         doc.state.showShortcuts = false // The sheet close button and Escape dismiss this binding.
         try expect(!doc.state.showShortcuts, "Help binding did not close")
         try expect(doc.state.note == beforeHelp, "Help modified document")
+        let preferencesDomain = "com.lightnote.preferences-test." + UUID().uuidString
+        let preferencesDefaults = UserDefaults(suiteName: preferencesDomain)!
+        defer { preferencesDefaults.removePersistentDomain(forName: preferencesDomain) }
+        let settings = AppPreferences(defaults: preferencesDefaults)
+        settings.penColor = .red; settings.penWidth = 3; settings.defaultPaper = .blank
+        settings.palette[0] = .blue
+        settings.paperColor = InkColor(0.9, 0.9, 0.8)
+        settings.gridColor = .green; settings.gridSpacing = 30
+        settings.automaticChecks = false; settings.automaticDownloads = false
+        let restoredSettings = AppPreferences(defaults: preferencesDefaults)
+        try expect(restoredSettings.penColor == .red && restoredSettings.penWidth == 3 && restoredSettings.defaultPaper == .blank,
+                   "Drawing preferences did not persist")
+        try expect(restoredSettings.colorPresets[0].color == .blue && restoredSettings.gridSpacing == 30 && restoredSettings.gridColor == .green,
+                   "Palette and grid preferences did not persist")
+        try expect(!restoredSettings.automaticChecks && !restoredSettings.automaticDownloads, "Update settings did not persist")
+        let preferencesKey = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
+            timestamp: 950, windowNumber: window.windowNumber, context: nil,
+            characters: ",", charactersIgnoringModifiers: ",", isARepeat: false, keyCode: 43)!
+        NSApp.mainMenu?.items.forEach { $0.submenu?.update() }
+        try expect(NSApp.mainMenu?.performKeyEquivalent(with: preferencesKey) == true, "Command-comma was not routed")
+        let preferencesWindow = NSApp.windows.first { $0.title == "환경설정" }
+        try expect(preferencesWindow?.contentView != nil, "Preferences window not created")
+        preferencesWindow?.close()
         print("Verified: 100 taps; 2002-sample stroke; mid-stroke save continuity; style; undo/redo; interruption; dot pixels; grid pixels/style undo/redo; stroke eraser click/sweep/undo/redo/keys; rectangle selection/move/undo/redo/save; zoom transforms/ink/eraser/reset; outer viewport grid/input/reopen; shapes/command circle/corner resize/undo/redo; laser hold/release/expiry/non-persistence; managed note automatic save/reopen; disk roundtrip; corrupt read")
         doc.updateChangeCount(.changeCleared)
         doc.close()
