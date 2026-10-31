@@ -1,4 +1,5 @@
 import AppKit
+@preconcurrency import Sparkle
 
 @main
 @MainActor
@@ -14,7 +15,10 @@ struct LightNoteMain {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
+    private lazy var updaterController = SPUStandardUpdaterController(
+        startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
+    private var postponedUpdate: (() -> Void)?
     private let documents = LightNoteDocumentController()
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Set the running/Dock icon explicitly; old Launch Services entries may cache the placeholder.
@@ -40,6 +44,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if documents.documents.isEmpty {
             documents.openLastDocument()
+        }
+        updaterController.startUpdater()
+    }
+    @objc private func checkForUpdates(_ sender: Any?) {
+        if let install = postponedUpdate {
+            do {
+                for case let document as NoteDocument in documents.documents { try document.persistNow() }
+                postponedUpdate = nil
+                install()
+            } catch { NSApp.presentError(error) }
+        } else { updaterController.checkForUpdates(sender) }
+    }
+    func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem,
+                 untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
+        do {
+            for case let document as NoteDocument in documents.documents { try document.persistNow() }
+            return false
+        } catch {
+            postponedUpdate = installHandler
+            NSApp.presentError(error)
+            return true
         }
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -75,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let app = submenu("LightNote")
         item(app, "LightNote 정보", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), "")
+        item(app, "업데이트 확인…", #selector(checkForUpdates(_:)), "")
         app.addItem(.separator())
         item(app, "LightNote 가리기", #selector(NSApplication.hide(_:)), "h")
         app.addItem(.separator())
