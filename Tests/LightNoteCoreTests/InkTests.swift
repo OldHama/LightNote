@@ -133,6 +133,19 @@ final class InkTests: XCTestCase {
         XCTAssertNil(InkStroke.shape(.arrow, from: start, to: start, constrained: false, color: .black, width: 1))
     }
 
+    func testCopiedStrokeKeepsMetadataWithIndependentIdentity() throws {
+        let original = InkStroke(color: .blue, width: 3, samples: [
+            InkSample(x: 10, y: 20, time: 1, pressure: 0.4), InkSample(x: 30, y: 40, time: 2, pressure: 0.8)])
+        let copy = original.copied(offset: CGSize(width: 15, height: 25))
+        XCTAssertNotEqual(copy.id, original.id)
+        XCTAssertEqual(copy.color, original.color); XCTAssertEqual(copy.width, original.width)
+        XCTAssertEqual(copy.tool, original.tool)
+        XCTAssertEqual(copy.samples[0].point, CGPoint(x: 25, y: 45))
+        XCTAssertEqual(copy.samples[0].pressure, 0.4); XCTAssertEqual(copy.samples[1].time, 2)
+        XCTAssertEqual(original.samples[0].point, CGPoint(x: 10, y: 20))
+        XCTAssertEqual(try NoteFile.decode(NoteFile(strokes: [original, copy]).encoded()).strokes, [original, copy])
+    }
+
     func testDotBoundsAreNotEmpty() {
         let dot = InkStroke(width: 0.5, samples: [InkSample(x: 50, y: 60, time: 0)])
         XCTAssertFalse(dot.bounds.isEmpty)

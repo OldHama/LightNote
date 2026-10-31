@@ -431,6 +431,58 @@ enum AppSelfTest {
         let preferencesWindow = NSApp.windows.first { $0.title == "환경설정" }
         try expect(preferencesWindow?.contentView != nil, "Preferences window not created")
         preferencesWindow?.close()
+        let board = NSPasteboard(name: NSPasteboard.Name("com.lightnote.tests." + UUID().uuidString))
+        defer { board.releaseGlobally() }
+        doc.state.selectTool(.selection)
+        canvas.mouseDown(with: event(.leftMouseDown, 2400, 1900, 1000))
+        canvas.mouseUp(with: event(.leftMouseUp, 3300, 2250, 1001))
+        let beforeCopy = doc.state.note.strokes
+        try expect(doc.state.hasSelection && canvas.copySelection(to: board), "Selection copy failed")
+        let payload = board.data(forType: InkCanvasView.inkPasteboardType)!
+        let source = try NoteFile.decode(payload).strokes
+        try expect(source.count == 3 && Set(source.map(\.tool)) == Set(["rectangle", "ellipse", "arrow"]), "Copy included wrong objects")
+        try expect(doc.state.note.strokes == beforeCopy, "Copy changed source")
+        begin(); let pasted = canvas.pasteSelection(from: board); end()
+        try expect(pasted && doc.state.note.strokes.count == beforeCopy.count+3, "Batch paste failed")
+        let firstPaste = doc.state.note.strokes
+        let firstIDs = Set(firstPaste.suffix(3).map(\.id))
+        try expect(firstIDs.isDisjoint(with: Set(beforeCopy.map(\.id))) && doc.state.hasSelection, "Pasted IDs or selection incorrect")
+        begin(); let pastedAgain = canvas.pasteSelection(from: board); end()
+        let secondPaste = doc.state.note.strokes
+        try expect(pastedAgain && secondPaste.count == beforeCopy.count+6, "Repeated paste failed")
+        try expect(secondPaste.last!.samples[0].point != firstPaste.last!.samples[0].point, "Repeated pastes overlap")
+        doc.undoInk(nil)
+        try expect(doc.state.note.strokes == firstPaste, "Paste undo did not remove one batch")
+        doc.redoInk(nil)
+        try expect(doc.state.note.strokes == secondPaste, "Paste redo not exact")
+        doc.undoInk(nil)
+        canvas.mouseDown(with: event(.leftMouseDown, 3099, 2199, 1002))
+        canvas.mouseUp(with: event(.leftMouseUp, 3251, 2201, 1003))
+        let duplicateKey = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
+            timestamp: 1004, windowNumber: window.windowNumber, context: nil,
+            characters: "d", charactersIgnoringModifiers: "d", isARepeat: false, keyCode: 2)!
+        begin()
+        NSApp.mainMenu?.items.forEach { $0.submenu?.update() }
+        try expect(NSApp.mainMenu?.performKeyEquivalent(with: duplicateKey) == true, "Command-D not routed")
+        end()
+        try expect(doc.state.note.strokes.count == firstPaste.count+1 && doc.state.note.strokes.last?.tool == "arrow", "Command-D did not duplicate selected arrow")
+        doc.undoInk(nil)
+        try expect(doc.state.note.strokes == firstPaste, "Duplicate undo failed")
+        let destinationDoc = NoteDocument()
+        let destinationCanvas = InkCanvasView(state: destinationDoc.state)
+        destinationDoc.undoManager?.groupsByEvent = false
+        destinationDoc.undoManager?.beginUndoGrouping()
+        try expect(destinationCanvas.pasteSelection(from: board), "Cross-note paste failed")
+        destinationDoc.undoManager?.endUndoGrouping()
+        try expect(destinationDoc.state.note.strokes.count == 3, "Cross-note paste count incorrect")
+        try expect(Set(destinationDoc.state.note.strokes.map(\.id)).isDisjoint(with: Set(source.map(\.id))), "Cross-note copy reused IDs")
+        let clipboardSaved = try NoteFile.decode(destinationDoc.data(ofType: "com.lightnote.note"))
+        try expect(clipboardSaved.strokes == destinationDoc.state.note.strokes, "Pasted objects not saved")
+        board.clearContents(); board.setData(Data("broken".utf8), forType: InkCanvasView.inkPasteboardType)
+        let beforeBadPaste = destinationDoc.state.note
+        try expect(!destinationCanvas.pasteSelection(from: board) && destinationDoc.state.note == beforeBadPaste, "Invalid clipboard changed note")
+        destinationDoc.updateChangeCount(.changeCleared); destinationDoc.close()
+        doc.state.selectTool(.pen)
         print("Verified: 100 taps; 2002-sample stroke; mid-stroke save continuity; style; undo/redo; interruption; dot pixels; grid pixels/style undo/redo; stroke eraser click/sweep/undo/redo/keys; rectangle selection/move/undo/redo/save; zoom transforms/ink/eraser/reset; outer viewport grid/input/reopen; shapes/command circle/corner resize/undo/redo; laser hold/release/expiry/non-persistence; managed note automatic save/reopen; disk roundtrip; corrupt read")
         doc.updateChangeCount(.changeCleared)
         doc.close()

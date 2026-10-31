@@ -99,7 +99,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         if let editor = NSApp.keyWindow?.firstResponder as? NSTextView { editor.undoManager?.redo() }
         else { activeNote?.redoInk(sender) }
     }
+    @objc func copyDocumentSelection(_ sender: Any?) {
+        if let editor = NSApp.keyWindow?.firstResponder as? NSTextView { editor.copy(sender) }
+        else { activeNote?.state.copyInk?() }
+    }
+    @objc func pasteDocumentSelection(_ sender: Any?) {
+        if let editor = NSApp.keyWindow?.firstResponder as? NSTextView { editor.paste(sender) }
+        else { activeNote?.state.pasteInk?() }
+    }
+    @objc func duplicateDocumentSelection(_ sender: Any?) {
+        guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
+        activeNote?.state.duplicateInk?()
+    }
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(copyDocumentSelection(_:)) {
+            if let editor = NSApp.keyWindow?.firstResponder as? NSTextView { return editor.selectedRange().length > 0 }
+            return activeNote?.state.hasSelection ?? false
+        }
+        if menuItem.action == #selector(pasteDocumentSelection(_:)) {
+            if let editor = NSApp.keyWindow?.firstResponder as? NSTextView { return editor.isEditable }
+            return activeNote != nil && NSPasteboard.general.availableType(from: [InkCanvasView.inkPasteboardType]) != nil
+        }
+        if menuItem.action == #selector(duplicateDocumentSelection(_:)) {
+            return !(NSApp.keyWindow?.firstResponder is NSTextView) && (activeNote?.state.hasSelection ?? false)
+        }
         if menuItem.action == #selector(undoDocument(_:)) { return currentUndoManager?.canUndo ?? false }
         if menuItem.action == #selector(redoDocument(_:)) { return currentUndoManager?.canRedo ?? false }
         return true
@@ -184,8 +207,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         edit.items.last?.target = self
         edit.addItem(.separator())
         item(edit, "잘라내기", #selector(NSText.cut(_:)), "x")
-        item(edit, "복사", #selector(NSText.copy(_:)), "c")
-        item(edit, "붙여넣기", #selector(NSText.paste(_:)), "v")
+        item(edit, "복사", #selector(copyDocumentSelection(_:)), "c")
+        edit.items.last?.target = self
+        item(edit, "붙여넣기", #selector(pasteDocumentSelection(_:)), "v")
+        edit.items.last?.target = self
+        item(edit, "복제", #selector(duplicateDocumentSelection(_:)), "d")
+        edit.items.last?.target = self
         item(edit, "모두 선택", #selector(NSText.selectAll(_:)), "a")
         let window = submenu("윈도우")
         item(window, "최소화", #selector(NSWindow.performMiniaturize(_:)), "m")

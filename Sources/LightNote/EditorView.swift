@@ -159,6 +159,8 @@ private struct ShortcutHelpView: View {
                     Text("편집과 문서").font(.headline).padding(.bottom, 6)
                     row("⌘ Z", "실행 취소")
                     row("⌘ ⇧ Z", "다시 실행")
+                    row("⌘ C / ⌘ V", "선택한 획 복사 / 붙여넣기")
+                    row("⌘ D", "선택한 획 복제")
                     row("⌫ / Delete", "선택한 획 삭제")
                     row("Esc", "선택 해제 · 도형 취소 · 도움말 닫기")
                     row("⌘ ,", "환경설정")

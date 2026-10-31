@@ -131,6 +131,9 @@ final class InkCanvasView: NSView {
     }
     private var shapeDraft: ShapeDraft?
     private var resizeDrag: ResizeDrag?
+    static let inkPasteboardType = NSPasteboard.PasteboardType("com.lightnote.ink-selection")
+    private var lastPasteChangeCount: Int?
+    private var pasteRepeatCount = 0
     private var selectedIDs = Set<UUID>()
     private var marqueeStart: CGPoint?
     private var marqueeRect: CGRect?
@@ -153,6 +156,9 @@ final class InkCanvasView: NSView {
         self.state = state
         super.init(frame: CGRect(x: 0, y: 0, width: state.note.pageWidth, height: state.note.pageHeight))
         expandWorkspaceToStoredInk()
+        state.copyInk = { [weak self] in self?.copySelection() }
+        state.pasteInk = { [weak self] in self?.pasteSelection() }
+        state.duplicateInk = { [weak self] in self?.duplicateSelection() }
         state.refreshAppearance = { [weak self] in self?.needsDisplay = true }
         state.refreshCursor = { [weak self] in
             guard let self else { return }
@@ -169,6 +175,7 @@ final class InkCanvasView: NSView {
             let ids = Set(self.state.note.strokes.map(\.id))
             self.cache = self.cache.filter { ids.contains($0.key) }
             self.selectedIDs.formIntersection(ids)
+            self.state.hasSelection = !self.selectedIDs.isEmpty
             if !self.selectedIDs.isEmpty { self.needsDisplay = true }
             if let rect { self.setNeedsDisplay(rect) } else {
                 self.cache.removeAll()
@@ -350,6 +357,56 @@ final class InkCanvasView: NSView {
         if !event.isEnteringProximity { finishStroke(reason: "proximity-exit") }
     }
 
+    @discardableResult
+    func copySelection(to pasteboard: NSPasteboard? = nil) -> Bool {
+        finishStroke(reason: "copy")
+        let strokes = state.note.strokes.filter { selectedIDs.contains($0.id) }
+        guard !strokes.isEmpty, let data = try? NoteFile(strokes: strokes).encoded() else { return false }
+        let board = pasteboard ?? .general
+        board.clearContents()
+        board.setData(data, forType: Self.inkPasteboardType)
+        lastPasteChangeCount = nil; pasteRepeatCount = 0
+        return true
+    }
+    @discardableResult
+    func pasteSelection(from pasteboard: NSPasteboard? = nil) -> Bool {
+        let board = pasteboard ?? .general
+        guard let data = board.data(forType: Self.inkPasteboardType),
+              let file = try? NoteFile.decode(data), !file.strokes.isEmpty else { return false }
+        if lastPasteChangeCount == board.changeCount { pasteRepeatCount += 1 }
+        else { lastPasteChangeCount = board.changeCount; pasteRepeatCount = 1 }
+        return insertCopies(file.strokes, offsetIndex: pasteRepeatCount, actionName: "붙여넣기")
+    }
+    @discardableResult
+    func duplicateSelection() -> Bool {
+        finishStroke(reason: "duplicate")
+        return insertCopies(state.note.strokes.filter { selectedIDs.contains($0.id) },
+                            offsetIndex: 1, actionName: "복제")
+    }
+    private func insertCopies(_ originals: [InkStroke], offsetIndex: Int, actionName: String) -> Bool {
+        guard !originals.isEmpty, let document = state.document else { return false }
+        finishStroke(reason: "paste")
+        let box = originals.reduce(CGRect.null) { $0.union($1.bounds) }
+        let offset = CGFloat(offsetIndex) * 20 / (enclosingScrollView?.magnification ?? 1)
+        let viewport = visibleRect.isEmpty ? bounds : visibleRect
+        var delta = CGSize(width: offset, height: offset)
+        if !viewport.contains(CGPoint(x: box.minX+offset, y: box.minY+offset)) {
+            delta = CGSize(width: viewport.minX+offset-box.minX, height: viewport.minY+offset-box.minY)
+        }
+        let copies = originals.map { $0.copied(offset: delta) }
+        guard (try? NoteFile(strokes: copies).validate()) != nil else { return false }
+        clearSelection()
+        state.selectTool(.selection)
+        let area = copies.reduce(CGRect.null) { $0.union($1.bounds) }
+        expandWorkspace(to: NSSize(width: area.maxX+24, height: area.maxY+24))
+        document.appendStrokes(copies, actionName: actionName)
+        selectedIDs = Set(copies.map(\.id))
+        state.hasSelection = true
+        setNeedsDisplay(area.insetBy(dx: -handleRadius*2, dy: -handleRadius*2))
+        window?.makeFirstResponder(self)
+        return true
+    }
+
     private var handleRadius: CGFloat { 7 / (enclosingScrollView?.magnification ?? 1) }
     private func handleCorners(_ rect: CGRect) -> [CGPoint] {
         [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
@@ -467,6 +524,7 @@ final class InkCanvasView: NSView {
         }
         if let rect = marqueeRect { setNeedsDisplay(rect.insetBy(dx: -3, dy: -3)) }
         selectedIDs.removeAll()
+        state.hasSelection = false
         marqueeStart = nil; marqueeRect = nil; moveStart = nil; moveDelta = .zero; resizeDrag = nil
     }
     private func updateSelection(with event: NSEvent) {
@@ -519,6 +577,7 @@ final class InkCanvasView: NSView {
                     stroke.intersectsEraser(from: corners[index], to: corners[(index+1)%4], radius: 0, polyline: points)
                 }
             }.map(\.id))
+            state.hasSelection = !selectedIDs.isEmpty
             marqueeStart = nil; marqueeRect = nil
             setNeedsDisplay(rect.insetBy(dx: -10, dy: -10))
             if let selectionBounds { setNeedsDisplay(selectionBounds.insetBy(dx: -3, dy: -3)) }

@@ -292,3 +292,15 @@ extension InkStroke {
         return stroke
     }
 }
+
+extension InkStroke {
+    public func copied(offset: CGSize) -> InkStroke {
+        var copy = self
+        copy.id = UUID()
+        for index in copy.samples.indices {
+            copy.samples[index].x += offset.width
+            copy.samples[index].y += offset.height
+        }
+        return copy
+    }
+}

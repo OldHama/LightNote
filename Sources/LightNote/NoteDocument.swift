@@ -27,6 +27,10 @@ final class NoteState: NSObject, ObservableObject {
     static let eraserRadius: CGFloat = 6
     var refreshCursor: (() -> Void)?
     var invalidateStrokeCache: ((Set<UUID>) -> Void)?
+    @Published var hasSelection = false
+    var copyInk: (() -> Void)?
+    var pasteInk: (() -> Void)?
+    var duplicateInk: (() -> Void)?
     @Published var showShortcuts = false
     @Published var tool: InkTool = .pen
     func selectTool(_ tool: InkTool) {
@@ -157,23 +161,23 @@ final class NoteDocument: NSDocument {
         state.refresh()
     }
 
-    func eraseStrokes(ids: Set<UUID>) {
+    func eraseStrokes(ids: Set<UUID>, actionName: String = "획 지우기") {
         let removed = state.note.strokes.enumerated().compactMap { index, stroke in
             ids.contains(stroke.id) ? (index, stroke) : nil
         }
         guard !removed.isEmpty else { return }
         state.note.strokes.removeAll { ids.contains($0.id) }
-        undoManager?.registerUndo(withTarget: self) { target in target.restoreStrokes(removed) }
-        undoManager?.setActionName("획 지우기")
+        undoManager?.registerUndo(withTarget: self) { target in target.restoreStrokes(removed, actionName: actionName) }
+        undoManager?.setActionName(actionName)
         let dirty = removed.reduce(CGRect.null) { $0.union($1.1.bounds) }
         state.invalidate?(dirty)
         state.refresh()
     }
-    private func restoreStrokes(_ removed: [(Int, InkStroke)]) {
+    private func restoreStrokes(_ removed: [(Int, InkStroke)], actionName: String) {
         for (index, stroke) in removed { state.note.strokes.insert(stroke, at: index) }
         let ids = Set(removed.map { $0.1.id })
-        undoManager?.registerUndo(withTarget: self) { target in target.eraseStrokes(ids: ids) }
-        undoManager?.setActionName("획 지우기")
+        undoManager?.registerUndo(withTarget: self) { target in target.eraseStrokes(ids: ids, actionName: actionName) }
+        undoManager?.setActionName(actionName)
         let dirty = removed.reduce(CGRect.null) { $0.union($1.1.bounds) }
         state.invalidate?(dirty)
         state.refresh()
@@ -222,6 +226,17 @@ final class NoteDocument: NSDocument {
         undoManager?.setActionName(actionName)
         state.invalidateStrokeCache?(Set(previous.map(\.id)))
         state.invalidate?(dirty)
+        state.refresh()
+    }
+
+    func appendStrokes(_ strokes: [InkStroke], actionName: String) {
+        guard !strokes.isEmpty else { return }
+        let ids = Set(strokes.map(\.id))
+        guard ids.count == strokes.count, !state.note.strokes.contains(where: { ids.contains($0.id) }) else { return }
+        state.note.strokes.append(contentsOf: strokes)
+        undoManager?.registerUndo(withTarget: self) { target in target.eraseStrokes(ids: ids, actionName: actionName) }
+        undoManager?.setActionName(actionName)
+        state.invalidate?(strokes.reduce(CGRect.null) { $0.union($1.bounds) })
         state.refresh()
     }
 
