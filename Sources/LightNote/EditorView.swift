@@ -7,6 +7,15 @@ struct EditorView: View {
     @ObservedObject private var updateAvailability = UpdateAvailability.shared
     var body: some View {
         VStack(spacing: 0) {
+            if let message = state.recoveryMessage {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle")
+                    Text(message).lineLimit(2)
+                    Spacer()
+                    Button("폴더 열기") { NSWorkspace.shared.open(RecoveryLocations.parent) }
+                    Button { state.recoveryMessage = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
+                }.font(.caption).padding(8).background(Color.yellow.opacity(0.15))
+            }
             HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 14) {

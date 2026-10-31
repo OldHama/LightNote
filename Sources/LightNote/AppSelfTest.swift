@@ -846,3 +846,116 @@ extension AppSelfTest {
         throw Failure(message: "Application did not terminate after saving")
     }
 }
+
+
+extension AppSelfTest {
+    static func testExternalConflicts() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("LightNote-conflict-"+UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let source = folder.appendingPathComponent("lesson.lightnote")
+        let base = NoteFile(strokes:[InkStroke(samples:[InkSample(x:1,y:1,time:1)])])
+        try base.encoded().write(to:source)
+        let doc = try NoteDocument(contentsOf:source,ofType:"com.lightnote.note")
+        NSDocumentController.shared.addDocument(doc)
+        doc.makeWindowControllers()
+        doc.undoManager?.groupsByEvent=false
+        defer { doc.updateChangeCount(.changeCleared); doc.close() }
+        doc.undoManager?.beginUndoGrouping()
+        doc.append(InkStroke(samples:[InkSample(x:2,y:2,time:2)]))
+        doc.undoManager?.endUndoGrouping()
+        let local = doc.state.note
+        let external = NoteFile(strokes:[InkStroke(color:.red,samples:[InkSample(x:50,y:50,time:50)])])
+        let before = Set((try? FileManager.default.contentsOfDirectory(at:RecoveryLocations.copies,includingPropertiesForKeys:nil)) ?? [])
+        try external.encoded().write(to:source,options:.atomic)
+        doc.presentedItemDidChange()
+        try await Task.sleep(for:.milliseconds(30))
+        guard doc.state.note == local else { throw Failure(message:"External notification discarded local changes") }
+        try await doc.persistLatest()
+        let copies = try FileManager.default.contentsOfDirectory(at:RecoveryLocations.copies,includingPropertiesForKeys:nil).filter{ !before.contains($0) }
+        guard try NoteFile.decode(Data(contentsOf:doc.fileURL!)) == local,
+              ((try NoteFile.decode(Data(contentsOf:source))) == external || copies.contains(where:{ (try? NoteFile.decode(Data(contentsOf:$0))) == external })) else {
+            throw Failure(message:"External save conflict did not preserve both notes")
+        }
+        let corrupt = Data("corrupt external document".utf8)
+        let current = doc.fileURL!
+        try corrupt.write(to:current,options:.atomic)
+        try await doc.persistLatest()
+        let allCopies = try FileManager.default.contentsOfDirectory(at:RecoveryLocations.copies,includingPropertiesForKeys:nil)
+        guard (try? Data(contentsOf:current)) == corrupt || allCopies.contains(where:{ (try? Data(contentsOf:$0)) == corrupt }) else {
+            throw Failure(message:"Corrupt external bytes were not preserved")
+        }
+        guard try NoteFile.decode(Data(contentsOf:doc.fileURL!)) == local else { throw Failure(message:"Local edits lost after corrupt external write") }
+        guard LightNoteDocumentController.retargetedPath(source.path,from:source,to:doc.fileURL!) == doc.fileURL!.path,
+              LightNoteDocumentController.retargetedPath("/unrelated.lightnote",from:source,to:doc.fileURL!) == "/unrelated.lightnote" else {
+            throw Failure(message:"Last opened file did not follow conflict copy")
+        }
+        print("EXTERNAL_CONFLICT_TESTS_PASSED local-edit/notification/remote-copy/corrupt-bytes-preserved")
+    }
+
+    static func runRecoveryProcess() async throws {
+        guard CommandLine.arguments.contains("--self-test"),
+              let path = ProcessInfo.processInfo.environment["LIGHTNOTE_TEST_DIRECTORY"] else { throw Failure(message:"Recovery subprocess not isolated") }
+        let folder=URL(fileURLWithPath:path,isDirectory:true)
+        if CommandLine.arguments.contains("--recover-only") {
+            let report=try await Task.detached {
+                try RecoveryJournal.recoverPending(root:RecoveryLocations.journals,destination:RecoveryLocations.copies)
+            }.value
+            let data=try JSONSerialization.data(withJSONObject:["recovered":report.recovered.map(\.path),"unreadable":report.unreadable.map(\.path)])
+            FileHandle.standardOutput.write(data); FileHandle.standardOutput.write(Data("\n".utf8)); exit(0)
+        }
+        NSDocumentController.shared.autosavingDelay=600
+        let source=folder.appendingPathComponent("lesson.lightnote")
+        let a=InkStroke(samples:[InkSample(x:10,y:20,time:1)])
+        try NoteFile(strokes:[a]).encoded().write(to:source)
+        let doc=try NoteDocument(contentsOf:source,ofType:"com.lightnote.note")
+        NSDocumentController.shared.addDocument(doc)
+        doc.makeWindowControllers()
+        doc.undoManager?.groupsByEvent=false
+        func edit(_ body:()->Void) { doc.undoManager?.beginUndoGrouping(); body(); doc.undoManager?.endUndoGrouping() }
+        for i in 0..<20 { edit { doc.append(InkStroke(color:.blue,samples:[InkSample(x:Double(i),y:30,time:Double(i))])) } }
+        edit { doc.moveStrokes(ids:[a.id],by:CGSize(width:12,height:13)) }
+        edit { doc.eraseStrokes(ids:[doc.state.note.strokes[3].id]) }
+        doc.undoInk(nil); doc.redoInk(nil)
+        edit { doc.setPaperStyle(.blank) }
+        let bitmap=NSBitmapImageRep(bitmapDataPlanes:nil,pixelsWide:2,pixelsHigh:2,bitsPerSample:8,samplesPerPixel:4,hasAlpha:true,isPlanar:false,colorSpaceName:.deviceRGB,bytesPerRow:0,bitsPerPixel:0)!
+        bitmap.setColor(.red,atX:0,y:0)
+        var image=InkStroke(samples:[InkSample(x:100,y:100,time:1),InkSample(x:200,y:150,time:1)])
+        image.tool="image"; image.imagePNG=bitmap.representation(using:.png,properties:[:])!
+        let shape=InkStroke.shape(.rectangle,from:CGPoint(x:300,y:300),to:CGPoint(x:400,y:350),constrained:false,color:.green,width:2)!
+        edit { doc.appendStrokes([image,shape],actionName:"이미지·도형") }
+        if CommandLine.arguments.contains("--kill-after-conflict") {
+            let external=NoteFile(strokes:[InkStroke(color:.red,samples:[InkSample(x:54321,y:1,time:1)])])
+            try external.encoded().write(to:source,options:.atomic)
+            doc.presentedItemDidChange()
+            try await Task.sleep(for:.milliseconds(20))
+            try await doc.persistLatest()
+        }
+        if CommandLine.arguments.contains("--kill-after-save") || CommandLine.arguments.contains("--normal-close") {
+            try await doc.persistLatest()
+            if !CommandLine.arguments.contains("--normal-close") { edit { doc.append(InkStroke(samples:[InkSample(x:99,y:99,time:99)])) } }
+        }
+        if CommandLine.arguments.contains("--kill-during-save") || CommandLine.arguments.contains("--kill-after-temp-write") {
+            let started=OSAllocatedUnfairLock(initialState:false)
+            let hold: @Sendable () -> Void = {
+                started.withLock { $0=true }
+                _ = DispatchSemaphore(value:0).wait(timeout:.now()+60)
+            }
+            if CommandLine.arguments.contains("--kill-after-temp-write") { doc.observeWrittenFileForTesting(hold) }
+            else { doc.observeSavesForTesting { _,_ in hold() } }
+            _ = Task { try await doc.persistLatest() }
+            for _ in 0..<1000 {
+                if started.withLock({$0}) { break }
+                try await Task.sleep(for:.milliseconds(5))
+            }
+            guard started.withLock({$0}) else { throw Failure(message:"No save to kill") }
+        }
+        try RecoveryJournal.durableWrite(doc.state.note.encoded(),to:folder.appendingPathComponent("expected.json"))
+        if CommandLine.arguments.contains("--normal-close") {
+            doc.close(); print("NORMAL_CLOSE"); exit(0)
+        }
+        FileHandle.standardOutput.write(Data("READY_TO_KILL\n".utf8))
+        try await Task.sleep(for:.seconds(120))
+        throw Failure(message:"Subprocess was not killed")
+    }
+}

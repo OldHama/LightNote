@@ -56,6 +56,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
             return
         }
         NSApp.activate(ignoringOtherApps: true)
+        if CommandLine.arguments.contains("--recovery-worker") || CommandLine.arguments.contains("--recover-only") {
+            Task { @MainActor in
+                do { try await AppSelfTest.runRecoveryProcess() }
+                catch { fputs("RECOVERY_PROCESS_FAILED: \(error)\n", stderr); exit(1) }
+            }
+            return
+        }
         if CommandLine.arguments.contains("--quit-save-test") {
             Task { @MainActor in
                 do { try await AppSelfTest.prepareQuitSavingTest() }
@@ -68,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
                 Task { @MainActor in
                     do {
                         try await AppSelfTest.testBackgroundSaving()
+                        try await AppSelfTest.testExternalConflicts()
                         print("APP_SELF_TEST_PASSED")
                         exit(0)
                     } catch {
@@ -83,10 +91,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
             }
             return
         }
-        if documents.documents.isEmpty {
-            documents.openLastDocument()
+        Task { @MainActor in
+            do {
+                let report = try await Task.detached(priority: .userInitiated) {
+                    try RecoveryJournal.recoverPending(root: RecoveryLocations.journals, destination: RecoveryLocations.copies)
+                }.value
+                let previous = UserDefaults.standard.string(forKey: LightNoteDocumentController.lastDocumentKey)
+                let preferred = report.recovered.last(where: { report.sources[$0]?.path == previous }) ?? report.recovered.last
+                if let preferred, documents.documents.isEmpty { UserDefaults.standard.set(preferred.path, forKey: LightNoteDocumentController.lastDocumentKey) }
+                if !report.recovered.isEmpty {
+                    documents.startupMessage = "노트 \(report.recovered.count)개 복구 · 복구 노트는 사본 폴더에 보존했습니다"
+                    if !report.unreadable.isEmpty { documents.startupMessage! += " · 일부 손상 기록도 보존했습니다" }
+                }
+                else if !report.unreadable.isEmpty { documents.startupMessage = "일부 복구 기록을 읽지 못했습니다 · 원본 기록은 보존했습니다" }
+            } catch { NSApp.presentError(error) }
+            if documents.documents.isEmpty { documents.openLastDocument() }
+            else { for case let note as NoteDocument in documents.documents { note.state.recoveryMessage = documents.startupMessage } }
+            updaterController.startUpdater()
         }
-        updaterController.startUpdater()
     }
     @objc func showPreferences(_ sender: Any?) {
         AppPreferences.shared.syncUpdateSettings(
@@ -283,7 +305,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
 /// Owns the permanent home of new notes, independently of macOS's window restoration setting.
 @MainActor
 final class LightNoteDocumentController: NSDocumentController {
+    var startupMessage: String?
     static let lastDocumentKey = "LightNoteLastDocumentPath"
+    static func retargetedPath(_ remembered: String?, from old: URL, to new: URL) -> String? {
+        guard let remembered,
+              URL(fileURLWithPath: remembered).resolvingSymlinksInPath().path == old.resolvingSymlinksInPath().path else { return remembered }
+        return new.path
+    }
     static var notesDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("LightNote/Notes", isDirectory: true)
@@ -297,6 +325,7 @@ final class LightNoteDocumentController: NSDocumentController {
         if let path = UserDefaults.standard.string(forKey: Self.lastDocumentKey),
            FileManager.default.fileExists(atPath: path) {
             openDocument(withContentsOf: URL(fileURLWithPath: path), display: true) { [weak self] document, _, error in
+                if let note = document as? NoteDocument { note.state.recoveryMessage = self?.startupMessage; self?.startupMessage = nil }
                 if let error { NSApp.presentError(error) }
                 if document == nil { self?.newDocument(nil) }
             }

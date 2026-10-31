@@ -2,6 +2,43 @@ import AppKit
 import SwiftUI
 import OSLog
 import os
+import Darwin
+
+private struct FileStamp: Equatable, Sendable {
+    var device: Int64
+    var inode: UInt64
+    var size: Int64
+    var modifiedSeconds: Int64
+    var modifiedNanos: Int64
+    var changedSeconds: Int64
+    var changedNanos: Int64
+    static func read(_ url: URL) throws -> FileStamp {
+        var info = stat()
+        let path = url.resolvingSymlinksInPath().path
+        guard lstat(path, &info) == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+        return FileStamp(device: Int64(info.st_dev), inode: info.st_ino, size: info.st_size,
+                         modifiedSeconds: Int64(info.st_mtimespec.tv_sec), modifiedNanos: Int64(info.st_mtimespec.tv_nsec),
+                         changedSeconds: Int64(info.st_ctimespec.tv_sec), changedNanos: Int64(info.st_ctimespec.tv_nsec))
+    }
+}
+
+enum RecoveryLocations {
+    static let parent: URL = {
+        if CommandLine.arguments.contains("--self-test") {
+            if let path = ProcessInfo.processInfo.environment["LIGHTNOTE_TEST_DIRECTORY"] { return URL(fileURLWithPath: path) }
+            return FileManager.default.temporaryDirectory.appendingPathComponent("LightNote-recovery-tests-"+UUID().uuidString)
+        }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("LightNote")
+    }()
+    static var journals: URL { parent.appendingPathComponent("Recovery") }
+    static var copies: URL { parent.appendingPathComponent("Notes") }
+    static func preserve(_ data: Data, name: String) throws -> URL {
+        try FileManager.default.createDirectory(at: copies, withIntermediateDirectories: true)
+        let url = copies.appendingPathComponent("\(RecoveryJournal.safeName(name)) (외부 변경 \(UUID().uuidString)).lightnote")
+        try RecoveryJournal.durableWrite(data, to: url)
+        return url
+    }
+}
 
 enum InkTool {
     case pen, eraser, selection, laser, ellipse, rectangle, arrow
@@ -49,6 +86,7 @@ final class NoteState: NSObject, ObservableObject {
     static let eraserRadius: CGFloat = 6
     var refreshCursor: (() -> Void)?
     var invalidateStrokeCache: ((Set<UUID>) -> Void)?
+    @Published var recoveryMessage: String?
     @Published var hasSelection = false
     var copyInk: (() -> Void)?
     var pasteInk: (() -> Void)?
@@ -112,6 +150,24 @@ final class NoteState: NSObject, ObservableObject {
 final class NoteDocument: NSDocument {
     let state = NoteState()
     private let log = Logger(subsystem: "com.lightnote.app", category: "Document")
+    private var isClosed = false
+    private var journal: RecoveryJournal?
+    private var recoveryBaseData: Data?
+    nonisolated private let diskStamp = OSAllocatedUnfairLock<FileStamp?>(initialState: nil)
+    nonisolated private let diskDigest = OSAllocatedUnfairLock<Data?>(initialState: nil)
+    nonisolated private let encodedDigest = OSAllocatedUnfairLock<Data?>(initialState: nil)
+    nonisolated private let writingSnapshot = OSAllocatedUnfairLock<NoteFile?>(initialState: nil)
+    private func ensureJournal() throws {
+        guard journal == nil, let fileURL else { return }
+        let base = try recoveryBaseData ?? Data(contentsOf: fileURL)
+        journal = try RecoveryJournal(root: RecoveryLocations.journals, source: fileURL, baseData: base)
+        recoveryBaseData = nil
+    }
+    private func reportRecoveryError(_ error: Error) {
+        state.recoveryMessage = "복구 기록 저장 실패 · 노트를 저장해 주세요"
+        log.error("Recovery journal error: \(error.localizedDescription)")
+    }
+
     override init() {
         super.init()
         state.document = self
@@ -119,6 +175,11 @@ final class NoteDocument: NSDocument {
     }
     // AppKit serializes file access and tracks the save's change-count token.
     // Only the immutable NoteFile snapshot crosses into its writing thread.
+    nonisolated private let writtenFileTestObserver = OSAllocatedUnfairLock<(@Sendable () throws -> Void)?>(initialState: nil)
+    func observeWrittenFileForTesting(_ observer: (@Sendable () throws -> Void)?) {
+        precondition(CommandLine.arguments.contains("--self-test"))
+        writtenFileTestObserver.withLock { $0 = observer }
+    }
     nonisolated private let saveTestObserver = OSAllocatedUnfairLock<(@Sendable (NoteFile, Bool) throws -> Void)?>(initialState: nil)
     func observeSavesForTesting(_ observer: (@Sendable (NoteFile, Bool) throws -> Void)?) {
         precondition(CommandLine.arguments.contains("--self-test"))
@@ -134,6 +195,7 @@ final class NoteDocument: NSDocument {
         if !CommandLine.arguments.contains("--self-test"), fileURL == nil {
             do { try persistNow() } catch { NSApp.presentError(error) }
         }
+        do { try ensureJournal() } catch { reportRecoveryError(error) }
         let root = EditorView(state: state)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1080, height: 820),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -207,7 +269,9 @@ final class NoteDocument: NSDocument {
         default: super.updateChangeCount(change)
         }
     }
-    private func contentDidChange() {
+    private func contentDidChange(_ delta: RecoveryDelta) {
+        do { try ensureJournal(); try journal?.append(delta) }
+        catch { reportRecoveryError(error) }
         if undoManager?.isUndoing == true { super.updateChangeCount(.changeUndone) }
         else if undoManager?.isRedoing == true { super.updateChangeCount(.changeRedone) }
         else { super.updateChangeCount(.changeDone) }
@@ -220,7 +284,7 @@ final class NoteDocument: NSDocument {
         undoManager?.registerUndo(withTarget: self) { target in target.setPaperStyle(previous) }
         undoManager?.setActionName("용지 변경")
         state.invalidate?(nil)
-        contentDidChange()
+        contentDidChange(RecoveryDelta(paper: style))
         state.refresh()
     }
 
@@ -234,7 +298,7 @@ final class NoteDocument: NSDocument {
         undoManager?.setActionName(actionName)
         let dirty = removed.reduce(CGRect.null) { $0.union($1.1.bounds) }
         state.invalidate?(dirty)
-        contentDidChange()
+        contentDidChange(RecoveryDelta(removed: removed.map { $0.1.id }))
         state.refresh()
     }
     private func restoreStrokes(_ removed: [(Int, InkStroke)], actionName: String) {
@@ -244,7 +308,7 @@ final class NoteDocument: NSDocument {
         undoManager?.setActionName(actionName)
         let dirty = removed.reduce(CGRect.null) { $0.union($1.1.bounds) }
         state.invalidate?(dirty)
-        contentDidChange()
+        contentDidChange(RecoveryDelta(puts: removed.map { .init(index: $0.0, stroke: $0.1) }))
         state.refresh()
     }
 
@@ -278,11 +342,13 @@ final class NoteDocument: NSDocument {
     private func replaceStrokes(_ replacements: [InkStroke], actionName: String = "선택 이동") {
         let lookup = Dictionary(uniqueKeysWithValues: replacements.map { ($0.id, $0) })
         var previous: [InkStroke] = []
+        var puts: [RecoveryDelta.Put] = []
         var dirty = CGRect.null
         for index in state.note.strokes.indices {
             let old = state.note.strokes[index]
             guard let replacement = lookup[old.id] else { continue }
             previous.append(old)
+            puts.append(.init(index: index, stroke: replacement))
             dirty = dirty.union(old.bounds).union(replacement.bounds)
             state.note.strokes[index] = replacement
         }
@@ -291,7 +357,7 @@ final class NoteDocument: NSDocument {
         undoManager?.setActionName(actionName)
         state.invalidateStrokeCache?(Set(previous.map(\.id)))
         state.invalidate?(dirty)
-        contentDidChange()
+        contentDidChange(RecoveryDelta(puts: puts))
         state.refresh()
     }
 
@@ -299,11 +365,12 @@ final class NoteDocument: NSDocument {
         guard !strokes.isEmpty else { return }
         let ids = Set(strokes.map(\.id))
         guard ids.count == strokes.count, !state.note.strokes.contains(where: { ids.contains($0.id) }) else { return }
+        let firstIndex = state.note.strokes.count
         state.note.strokes.append(contentsOf: strokes)
         undoManager?.registerUndo(withTarget: self) { target in target.eraseStrokes(ids: ids, actionName: actionName) }
         undoManager?.setActionName(actionName)
         state.invalidate?(strokes.reduce(CGRect.null) { $0.union($1.bounds) })
-        contentDidChange()
+        contentDidChange(RecoveryDelta(puts: strokes.enumerated().map { .init(index: firstIndex+$0.offset, stroke: $0.element) }))
         state.refresh()
     }
 
@@ -313,7 +380,7 @@ final class NoteDocument: NSDocument {
         undoManager?.registerUndo(withTarget: self) { target in target.remove(at: index) }
         undoManager?.setActionName("필기")
         state.invalidate?(stroke.bounds)
-        contentDidChange()
+        contentDidChange(RecoveryDelta(puts: [.init(index: index, stroke: stroke)]))
         state.refresh()
     }
     private func remove(at index: Int) {
@@ -322,7 +389,7 @@ final class NoteDocument: NSDocument {
         undoManager?.registerUndo(withTarget: self) { target in target.insert(stroke, at: index) }
         undoManager?.setActionName("필기")
         state.invalidate?(stroke.bounds)
-        contentDidChange()
+        contentDidChange(RecoveryDelta(removed: [stroke.id]))
         state.refresh()
     }
     private func insert(_ stroke: InkStroke, at index: Int) {
@@ -330,7 +397,7 @@ final class NoteDocument: NSDocument {
         undoManager?.registerUndo(withTarget: self) { target in target.remove(at: index) }
         undoManager?.setActionName("필기")
         state.invalidate?(stroke.bounds)
-        contentDidChange()
+        contentDidChange(RecoveryDelta(puts: [.init(index: index, stroke: stroke)]))
         state.refresh()
     }
     @objc func undoInk(_ sender: Any?) {
@@ -344,17 +411,110 @@ final class NoteDocument: NSDocument {
         state.refresh()
     }
 
+    override func save(to url: URL, ofType typeName: String, for operation: NSDocument.SaveOperationType,
+                       completionHandler: @escaping (Error?) -> Void) {
+        let previousURL = fileURL
+        super.save(to: url, ofType: typeName, for: operation) { error in
+            guard let error else {
+                self.rememberReplacement(from: previousURL)
+                if let current = self.fileURL {
+                    do { try self.journal?.retarget(to: current) } catch { self.reportRecoveryError(error) }
+                }
+                completionHandler(nil); return
+            }
+            guard operation == .saveOperation || operation == .autosaveInPlaceOperation,
+                  let expected = self.diskDigest.withLock({ $0 }) else { completionHandler(error); return }
+            // AppKit may reject an externally modified file BEFORE writeSafely.
+            // Inspect the bytes; never auto-select its destructive "Save Anyway" option.
+            Task { @MainActor in
+                let changed = await Task.detached {
+                    guard let data = try? Data(contentsOf: url) else { return false }
+                    return RecoveryJournal.digest(data) != expected
+                }.value
+                guard changed else { completionHandler(error); return }
+                do {
+                    try FileManager.default.createDirectory(at: RecoveryLocations.copies, withIntermediateDirectories: true)
+                    let name = RecoveryJournal.safeName(url.deletingPathExtension().lastPathComponent)
+                    let fork = RecoveryLocations.copies.appendingPathComponent("\(name) (충돌 \(UUID().uuidString)).lightnote")
+                    try await self.saveConflictCopy(to: fork, typeName: typeName)
+                    self.rememberReplacement(from: previousURL)
+                    try self.journal?.retarget(to: fork)
+                    self.state.recoveryMessage = "외부 원본 유지 · 현재 편집은 충돌 사본으로 저장했습니다"
+                    completionHandler(nil)
+                } catch { completionHandler(error) }
+            }
+        }
+    }
+    private func rememberReplacement(from previous: URL?) {
+        guard !CommandLine.arguments.contains("--self-test"), let previous, let current = fileURL else { return }
+        let key = LightNoteDocumentController.lastDocumentKey
+        let oldPath = UserDefaults.standard.string(forKey: key)
+        let updated = LightNoteDocumentController.retargetedPath(oldPath, from: previous, to: current)
+        if updated != oldPath { UserDefaults.standard.set(updated, forKey: key) }
+    }
+    private func saveConflictCopy(to url: URL, typeName: String) async throws {
+        try await super.save(to: url, ofType: typeName, for: .saveAsOperation)
+    }
+
+    nonisolated override func writeSafely(to url: URL, ofType typeName: String,
+                                          for operation: NSDocument.SaveOperationType) throws {
+        let snapshot = state.savingSnapshot()
+        writingSnapshot.withLock { $0 = snapshot }
+        defer { writingSnapshot.withLock { $0 = nil } }
+        unblockUserInteraction()
+        if operation == .saveOperation || operation == .autosaveInPlaceOperation,
+           let expected = diskDigest.withLock({ $0 }), FileManager.default.fileExists(atPath: url.path),
+           try diskStamp.withLock({ $0 }) != FileStamp.read(url) {
+            let external = try Data(contentsOf: url)
+            if RecoveryJournal.digest(external) != expected {
+                _ = try RecoveryLocations.preserve(external, name: url.deletingPathExtension().lastPathComponent)
+                Task { @MainActor in self.state.recoveryMessage = "외부 변경 내용을 별도 노트로 보존했습니다" }
+            }
+        }
+        // Do not mark iCloud conflicts resolved; preserve all versions first.
+        for version in NSFileVersion.unresolvedConflictVersionsOfItem(at: url) ?? [] {
+            _ = try RecoveryLocations.preserve(Data(contentsOf: version.url), name: url.deletingPathExtension().lastPathComponent)
+        }
+        try super.writeSafely(to: url, ofType: typeName, for: operation)
+        if operation == .saveOperation || operation == .saveAsOperation || operation == .autosaveInPlaceOperation {
+            let digest = encodedDigest.withLock { $0 }
+            diskDigest.withLock { $0 = digest }
+            let stamp = try FileStamp.read(url)
+            diskStamp.withLock { $0 = stamp }
+        }
+    }
+    nonisolated override func presentedItemDidChange() {
+        // Any external notification invalidates the metadata fast path, even if
+        // a cooperating writer deliberately restored its old modification date.
+        diskStamp.withLock { $0 = nil }
+        Task { @MainActor in
+            guard !self.isClosed else { return }
+            // Never let automatic rereading erase uncommitted local edits.
+            if self.hasUnautosavedChanges { self.state.recoveryMessage = "외부 변경 감지 · 저장 시 양쪽 내용을 보존합니다" }
+            else { self.forwardExternalChange() }
+        }
+    }
+    private func forwardExternalChange() { super.presentedItemDidChange() }
+
+    nonisolated override func write(to url: URL, ofType typeName: String) throws {
+        try super.write(to: url, ofType: typeName)
+        let observer = writtenFileTestObserver.withLock { $0 }
+        try observer?()
+    }
+
     nonisolated override func data(ofType typeName: String) throws -> Data {
         // AppKit blocks main-thread interaction until we release it below. The
         // lock also covers direct diagnostic calls and any overlapping model access.
         // Do not dispatch to main here: AppKit may be synchronously waiting for us.
-        let snapshot = state.savingSnapshot()
+        let snapshot = writingSnapshot.withLock { $0 } ?? state.savingSnapshot()
         // Release interaction BEFORE encoding. Later edits use Swift copy-on-write;
         // AppKit's token leaves those edits dirty when this snapshot finishes.
         unblockUserInteraction()
         let observer = saveTestObserver.withLock { $0 }
         try observer?(snapshot, Thread.isMainThread)
         let data = try snapshot.encoded()
+        let digest = RecoveryJournal.digest(data)
+        encodedDigest.withLock { $0 = digest }
         log.info("Serialized strokes=\(snapshot.strokes.count) bytes=\(data.count)")
         return data
     }
@@ -362,6 +522,12 @@ final class NoteDocument: NSDocument {
         let decoded = try NoteFile.decode(data)
         // Concurrent reading is disabled above, so AppKit calls this on the main thread.
         MainActor.assumeIsolated {
+            try? journal?.discard()
+            journal = nil
+            recoveryBaseData = data
+            let digest = RecoveryJournal.digest(data)
+            diskDigest.withLock { $0 = digest }
+            diskStamp.withLock { $0 = nil }
             state.note = decoded
             undoManager?.removeAllActions()
             state.invalidate?(nil)
@@ -370,6 +536,9 @@ final class NoteDocument: NSDocument {
     }
     override func close() {
         state.finishInput?()
+        isClosed = true
+        // Normal close follows AppKit's save/discard review. SIGKILL cannot reach here.
+        do { try journal?.discard(); journal = nil } catch { reportRecoveryError(error) }
         super.close()
     }
 }
@@ -382,6 +551,9 @@ final class NoteWindowController: NSWindowController {
         let name = url.deletingPathExtension().lastPathComponent
         if name.hasPrefix("노트-"), UUID(uuidString: String(name.dropFirst(3))) != nil {
             return "새 노트"
+        }
+        for kind in ["복구", "충돌"] {
+            if let range = name.range(of: " ("+kind+" ") { return String(name[..<range.lowerBound]) + " ("+kind+")" }
         }
         return name
     }
