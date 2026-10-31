@@ -46,3 +46,5 @@
 현재 배포 앱은 ad-hoc 서명이며 Apple Developer ID 서명·공증은 아직 없습니다. Ed25519는 업데이트 무결성 검증을 제공하며, 최초 다운로드 시 macOS가 요구하는 보안 확인을 대신하지 않습니다.
 
 참고: [Sparkle 설정](https://sparkle-project.org/documentation/customization/), [프로그램 방식 연결](https://sparkle-project.org/documentation/programmatic-setup/), [서명과 게시](https://sparkle-project.org/documentation/publishing/).
+
+새 버전이 확인되면 상단 오른쪽의 파란 다운로드 버튼을 표시합니다. 버튼은 도구 모음 스크롤과 분리해 고정하며, 새 버전이 없다는 확인을 받으면 숨깁니다. 수동 확인은 LightNote 메뉴 또는 환경설정의 업데이트 탭에서 수행합니다.

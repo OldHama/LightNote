@@ -4,8 +4,10 @@ import AppKit
 struct EditorView: View {
     @ObservedObject var state: NoteState
     @ObservedObject private var preferences = AppPreferences.shared
+    @ObservedObject private var updateAvailability = UpdateAvailability.shared
     var body: some View {
         VStack(spacing: 0) {
+            HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 14) {
                     Button { NSDocumentController.shared.newDocument(nil) } label: { Image(systemName: "doc.badge.plus") }
@@ -14,12 +16,6 @@ struct EditorView: View {
                         .help("열기 · ⌘O").accessibilityLabel("열기")
                     Button { state.finishInput?(); state.document?.save(nil) } label: { Image(systemName: "square.and.arrow.down") }
                         .help("저장 · ⌘S").accessibilityLabel("저장")
-                    Button {
-                        NSApp.sendAction(#selector(AppDelegate.checkForUpdates(_:)), to: NSApp.delegate, from: nil)
-                    } label: {
-                        Image(systemName: "arrow.down.circle")
-                            .foregroundStyle(Color.accentColor)
-                    }.help("새 버전 다운로드 및 업데이트").accessibilityLabel("업데이트 다운로드")
                     Button { state.showShortcuts = true } label: {
                         Image(systemName: "questionmark.circle")
                     }.help("단축키 도움말 · /").accessibilityLabel("단축키 도움말")
@@ -87,6 +83,19 @@ struct EditorView: View {
                 .padding(.horizontal, 18).frame(height: 58)
             }
             .frame(height: 58)
+            if let version = updateAvailability.version {
+                Button {
+                    NSApp.sendAction(#selector(AppDelegate.checkForUpdates(_:)), to: NSApp.delegate, from: nil)
+                } label: {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 22)).foregroundStyle(Color.blue)
+                }
+                .buttonStyle(.plain)
+                .help("LightNote " + version + " 다운로드 및 업데이트")
+                .accessibilityLabel("새 버전 다운로드")
+                .padding(.horizontal, 16)
+            }
+            }
             .background(.bar)
             Divider()
             CanvasHost(state: state)

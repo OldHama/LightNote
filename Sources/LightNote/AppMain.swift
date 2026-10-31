@@ -2,6 +2,12 @@ import AppKit
 import SwiftUI
 @preconcurrency import Sparkle
 
+@MainActor
+final class UpdateAvailability: ObservableObject {
+    static let shared = UpdateAvailability()
+    @Published var version: String?
+}
+
 @main
 @MainActor
 struct LightNoteMain {
@@ -106,6 +112,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
                 install()
             } catch { NSApp.presentError(error) }
         } else { updaterController.checkForUpdates(sender) }
+    }
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        UpdateAvailability.shared.version = item.displayVersionString
+    }
+    func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
+        UpdateAvailability.shared.version = nil
     }
     func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem,
                  untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
