@@ -1,4 +1,5 @@
 import AppKit
+import os
 
 /// In-process native event integration checks. These do not simulate Sidecar hardware.
 @MainActor
@@ -531,6 +532,7 @@ extension AppSelfTest {
             MainActor.assumeIsolated { beat.tick() }
         }
         defer { timer.invalidate() }
+        let applied = CommandLine.arguments.contains("--save-benchmark-applied")
         print("SAVE_BENCHMARK optimized=\(!_isDebugAssertConfiguration()) heartbeat_ms=5 samples_per_stroke=100 repeats=3")
         print("strokes,bytes,mode,run,elapsed_ms,max_main_gap_ms")
         for count in [1000, 10000, 20000] {
@@ -543,7 +545,7 @@ extension AppSelfTest {
                 })
             }
             for run in 1...3 {
-                for mode in ["main_encode", "main_safe_save", "background_prototype"] {
+                for mode in (applied ? ["appkit_async"] : ["main_encode", "main_safe_save", "background_prototype"]) {
                     try await Task.sleep(for: .milliseconds(20))
                     beat.reset()
                     let start = ProcessInfo.processInfo.systemUptime
@@ -552,6 +554,9 @@ extension AppSelfTest {
                         bytes = try doc.data(ofType: "com.lightnote.note").count
                     } else if mode == "main_safe_save" {
                         try doc.persistNow(directory: directory)
+                        bytes = try doc.fileURL!.resourceValues(forKeys: [.fileSizeKey]).fileSize!
+                    } else if mode == "appkit_async" {
+                        try await doc.persistLatest(directory: directory)
                         bytes = try doc.fileURL!.resourceValues(forKeys: [.fileSizeKey]).fileSize!
                     } else {
                         let snapshot = doc.state.note
@@ -589,5 +594,255 @@ extension AppSelfTest {
             print("SNAPSHOT_CHECK_PASSED strokes=\(count)")
         }
         print("SAVE_BENCHMARK_PASSED")
+    }
+}
+
+
+@MainActor
+private final class SaveCloseProbe: NSObject {
+    var allowed: Bool?
+    @objc func document(_ document: NSDocument, shouldClose: Bool, contextInfo: UnsafeMutableRawPointer?) {
+        allowed = shouldClose
+    }
+}
+
+extension AppSelfTest {
+    static func testBackgroundSaving() async throws {
+        func check(_ value: @autoclosure () throws -> Bool, _ message: String) throws {
+            if try !value() { throw Failure(message: message) }
+        }
+        func waitFor(_ label: String, _ predicate: () -> Bool) async throws {
+            for _ in 0..<1000 {
+                if predicate() { return }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            throw Failure(message: "Timed out waiting for asynchronous save: \(label)")
+        }
+        final class Gate: Sendable {
+            let started = OSAllocatedUnfairLock(initialState: false)
+            let threads = OSAllocatedUnfairLock(initialState: [Bool]())
+            let counts = OSAllocatedUnfairLock(initialState: [Int]())
+            let release = DispatchSemaphore(value: 0)
+            func observe(_ note: NoteFile, _ main: Bool) throws {
+                threads.withLock { $0.append(main) }
+                let first = counts.withLock { counts in counts.append(note.strokes.count); return counts.count == 1 }
+                if first {
+                    started.withLock { $0 = true }
+                    if release.wait(timeout: .now()+10) == .timedOut {
+                        throw Failure(message: "Save test gate timed out")
+                    }
+                }
+            }
+        }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("LightNote-async-tests-"+UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let oldDelay = NSDocumentController.shared.autosavingDelay
+        NSDocumentController.shared.autosavingDelay = 60
+        defer { NSDocumentController.shared.autosavingDelay = oldDelay }
+        var documents: [NoteDocument] = []
+        defer {
+            for doc in documents {
+                doc.observeSavesForTesting(nil)
+                doc.updateChangeCount(.changeCleared); doc.close()
+            }
+        }
+        func makeDocument() throws -> NoteDocument {
+            let doc = NoteDocument()
+            NSDocumentController.shared.addDocument(doc)
+            doc.makeWindowControllers()
+            doc.undoManager?.groupsByEvent = false
+            try doc.persistNow(directory: folder)
+            documents.append(doc)
+            return doc
+        }
+        func edit(_ doc: NoteDocument, _ x: Double) {
+            doc.undoManager?.beginUndoGrouping()
+            doc.append(InkStroke(samples: [InkSample(x: x, y: 10, time: x)]))
+            doc.undoManager?.endUndoGrouping()
+        }
+        func disk(_ doc: NoteDocument) throws -> NoteFile {
+            try NoteFile.decode(Data(contentsOf: doc.fileURL!))
+        }
+        let untitled = NoteDocument()
+        NSDocumentController.shared.addDocument(untitled)
+        documents.append(untitled)
+        let initialThreads = OSAllocatedUnfairLock(initialState: [Bool]())
+        untitled.observeSavesForTesting { _, main in initialThreads.withLock { $0.append(main) } }
+        untitled.state.note.strokes = [InkStroke(samples: [InkSample(x: 1, y: 2, time: 3)])]
+        try await untitled.persistLatest(directory: folder)
+        try check(try disk(untitled) == untitled.state.note, "Initial asynchronous contents mismatch")
+        try check(untitled.fileURL?.deletingLastPathComponent().resolvingSymlinksInPath().path == folder.resolvingSymlinksInPath().path,
+                  "Initial asynchronous assignment escaped isolated directory")
+        try check(initialThreads.withLock { !$0.isEmpty && $0.allSatisfy { !$0 } }, "Initial save encoded on main thread")
+        untitled.observeSavesForTesting(nil)
+        let doc = try makeDocument()
+        edit(doc, 1)
+        try check(doc.hasUnautosavedChanges, "AppKit did not mark completed undo group dirty (manager=\(doc.undoManager != nil), canUndo=\(doc.undoManager?.canUndo ?? false))")
+        let firstSnapshot = doc.state.note
+        let gate = Gate()
+        defer { gate.release.signal() }
+        doc.observeSavesForTesting { try gate.observe($0, $1) }
+        let saving = Task { try await doc.autosave(withImplicitCancellability: false) }
+        try await waitFor("snapshot") { gate.started.withLock { $0 } }
+        // This executes on the main actor while the writing thread is held open.
+        edit(doc, 2)
+        doc.undoManager?.beginUndoGrouping()
+        doc.moveStrokes(ids: [firstSnapshot.strokes[0].id], by: CGSize(width: 3, height: 4))
+        doc.undoManager?.endUndoGrouping()
+        gate.release.signal()
+        try await saving.value
+        try check(try disk(doc) == firstSnapshot, "Autosave changed immutable snapshot")
+        try check(doc.hasUnautosavedChanges, "Old autosave cleared newer input")
+        try check(gate.threads.withLock { !$0.isEmpty && $0.allSatisfy { !$0 } }, "Autosave encoded on main thread")
+        try await doc.persistLatest()
+        try check(try disk(doc) == doc.state.note && !doc.hasUnautosavedChanges, "Latest flush lost input")
+
+        edit(doc, 999)
+        doc.undoInk(nil)
+        try check(!doc.hasUnautosavedChanges, "Undo to saved contents remained dirty")
+        doc.redoInk(nil)
+        try check(doc.hasUnautosavedChanges, "Redo failed to mark changes dirty")
+        doc.undoInk(nil)
+        let ordered = Gate()
+        defer { ordered.release.signal() }
+        doc.observeSavesForTesting { try ordered.observe($0, $1) }
+        edit(doc, 3)
+        let earlier = Task { try await doc.persistLatest() }
+        try await waitFor("ordered") { ordered.started.withLock { $0 } }
+        edit(doc, 4)
+        // AppKit can synchronously wait for an earlier activity at save entry.
+        // Release off-main so this test also catches any main-queue deadlock.
+        DispatchQueue.global().asyncAfter(deadline: .now()+0.1) { ordered.release.signal() }
+        let later = Task { try await doc.persistLatest() }
+        try await earlier.value; try await later.value
+        try check(try disk(doc) == doc.state.note, "Earlier save overwrote later input")
+        try check(ordered.counts.withLock { $0.first == 3 && $0.last == 4 && $0 == $0.sorted() }, "Writes were out of order")
+
+        let closing = Gate()
+        defer { closing.release.signal() }
+        doc.observeSavesForTesting { try closing.observe($0, $1) }
+        edit(doc, 5)
+        let beforeClose = Task { try await doc.autosave(withImplicitCancellability: false) }
+        try await waitFor("closing-save") { closing.started.withLock { $0 } }
+        edit(doc, 6)
+        let probe = SaveCloseProbe()
+        DispatchQueue.global().asyncAfter(deadline: .now()+0.1) { closing.release.signal() }
+        // Dispatch like an AppKit menu/window event, outside an executing Swift task.
+        RunLoop.main.perform(inModes: [.common]) {
+            MainActor.assumeIsolated {
+                doc.canClose(withDelegate: probe, shouldClose: #selector(SaveCloseProbe.document(_:shouldClose:contextInfo:)), contextInfo: nil)
+            }
+        }
+        try await waitFor("close-callback") { probe.allowed != nil }
+        try await beforeClose.value
+        try check(probe.allowed == true && (try disk(doc)) == doc.state.note, "Close approved before latest input saved")
+        doc.observeSavesForTesting(nil)
+
+        // Simulate quit/relaunch through the exact shared production flush path.
+        let other = try makeDocument()
+        edit(doc, 7); edit(other, 20)
+        let quitting = Gate()
+        defer { quitting.release.signal() }
+        other.observeSavesForTesting { try quitting.observe($0, $1) }
+        let delegate = NSApp.delegate as! AppDelegate
+        let quitFlush = Task { try await delegate.flushDocumentsBeforeExit() }
+        try await waitFor("quit-flush") { quitting.started.withLock { $0 } }
+        edit(doc, 8) // The first document was saved before the second one began.
+        quitting.release.signal()
+        try await quitFlush.value
+        try check(try disk(doc) == doc.state.note && (try disk(other)) == other.state.note, "Quit flush omitted edits across documents")
+        try check(!doc.hasUnautosavedChanges && !other.hasUnautosavedChanges, "Quit flush left unsaved changes")
+        other.observeSavesForTesting(nil)
+
+        let previous = try Data(contentsOf: doc.fileURL!)
+        edit(doc, 9)
+        doc.observeSavesForTesting { _, _ in throw CocoaError(.fileWriteUnknown) }
+        do {
+            try await delegate.flushDocumentsBeforeExit()
+            throw Failure(message: "Failed save permitted quit flush")
+        } catch is CocoaError { }
+        try check(doc.hasUnautosavedChanges, "Failed save cleared dirty state")
+        try check(try Data(contentsOf: doc.fileURL!) == previous, "Failed save damaged previous file")
+        doc.observeSavesForTesting(nil)
+        do {
+            try await doc.save(to: folder.appendingPathComponent("missing/child/note.lightnote"), ofType: "com.lightnote.note", for: .saveToOperation)
+            throw Failure(message: "Missing-parent write unexpectedly succeeded")
+        } catch is CocoaError { }
+        try check(doc.hasUnautosavedChanges && (try Data(contentsOf: doc.fileURL!)) == previous, "Filesystem error lost original or dirty state")
+        try await delegate.flushDocumentsBeforeExit()
+        try check(try disk(doc) == doc.state.note, "Retry after write failure did not save")
+
+        // Verify the actual scheduled autosave timer, not just explicit save calls.
+        NSDocumentController.shared.autosavingDelay = 0.05
+        let automatic = try makeDocument()
+        edit(automatic, 30)
+        try await waitFor("scheduled-timer") { !automatic.hasUnautosavedChanges }
+        try check(try disk(automatic) == automatic.state.note, "Scheduled autosave did not persist input")
+        print("BACKGROUND_SAVE_TESTS_PASSED snapshot/new-input/dirty-token/ordered-writes/close/quit-multiple-documents/write-failure/retry/scheduled-autosave")
+    }
+}
+
+
+extension AppSelfTest {
+    /// Runs in a disposable subprocess because success actually terminates NSApp.
+    static func prepareQuitSavingTest() async throws {
+        guard CommandLine.arguments.contains("--self-test"),
+              let directory = ProcessInfo.processInfo.environment["LIGHTNOTE_TEST_DIRECTORY"] else { throw Failure(message: "Missing isolated lifecycle directory") }
+        let folder = URL(fileURLWithPath: directory, isDirectory: true)
+        let doc = NoteDocument()
+        NSDocumentController.shared.addDocument(doc)
+        doc.makeWindowControllers()
+        doc.undoManager?.groupsByEvent = false
+        try doc.persistNow(directory: folder)
+        let original = try Data(contentsOf: doc.fileURL!)
+        func edit(_ x: Double) {
+            doc.undoManager?.beginUndoGrouping()
+            doc.append(InkStroke(samples: [InkSample(x: x, y: 5, time: x)]))
+            doc.undoManager?.endUndoGrouping()
+        }
+        edit(1)
+        if CommandLine.arguments.contains("--fail-save") {
+            doc.observeSavesForTesting { _, _ in throw CocoaError(.fileWriteUnknown) }
+            let delegate = NSApp.delegate as! AppDelegate
+            RunLoop.main.perform(inModes: [.common]) {
+                MainActor.assumeIsolated { NSApp.terminate(nil) }
+            }
+            for _ in 0..<1000 {
+                if !delegate.terminationPending {
+                    guard doc.hasUnautosavedChanges, doc.state.note.strokes.count == 1,
+                          try Data(contentsOf: doc.fileURL!) == original else { throw Failure(message: "Quit failure lost content") }
+                    print("QUIT_FAILURE_CANCELLED_AND_CONTENT_PRESERVED")
+                    doc.observeSavesForTesting(nil)
+                    doc.updateChangeCount(.changeCleared); doc.close()
+                    exit(0)
+                }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            throw Failure(message: "Quit was not cancelled after write failure")
+        }
+        let started = OSAllocatedUnfairLock(initialState: false)
+        let gate = DispatchSemaphore(value: 0)
+        defer { gate.signal() }
+        doc.observeSavesForTesting { _, _ in
+            let first = started.withLock { value in let first = !value; value = true; return first }
+            if first, gate.wait(timeout: .now()+10) == .timedOut { throw Failure(message: "Quit gate timed out") }
+        }
+        let pending = Task { try await doc.autosave(withImplicitCancellability: false) }
+        for _ in 0..<1000 {
+            if started.withLock({ $0 }) { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        guard started.withLock({ $0 }) else { throw Failure(message: "No in-flight autosave") }
+        edit(2)
+        try doc.state.note.encoded().write(to: folder.appendingPathComponent("expected.json"))
+        DispatchQueue.global().asyncAfter(deadline: .now()+0.1) { gate.signal() }
+        RunLoop.main.perform(inModes: [.common]) {
+            MainActor.assumeIsolated { NSApp.terminate(nil) }
+        }
+        try await pending.value
+        // Keep the subprocess alive for the asynchronous termination reply.
+        try await Task.sleep(for: .seconds(15))
+        throw Failure(message: "Application did not terminate after saving")
     }
 }

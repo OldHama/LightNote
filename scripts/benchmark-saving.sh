@@ -10,4 +10,4 @@ xcrun swiftc -swift-version 6 -O -target "$(uname -m)-apple-macosx15.0" -sdk "$s
     -F "$sparkle_dir" -framework Sparkle -Xlinker -rpath -Xlinker "$sparkle_dir" \
     Sources/LightNoteCore/*.swift Sources/LightNote/*.swift -o "$benchmark_dir/LightNote-save-benchmark"
 # --self-test isolates preferences and prevents changing the last-opened document.
-"$benchmark_dir/LightNote-save-benchmark" --save-benchmark --self-test
+"$benchmark_dir/LightNote-save-benchmark" --save-benchmark --self-test "$@"

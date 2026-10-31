@@ -12,6 +12,12 @@ final class UpdateAvailability: ObservableObject {
 @MainActor
 struct LightNoteMain {
     static func main() {
+        if CommandLine.arguments.contains("--self-test") {
+            // Process-local only: diagnostic crashes must not prompt to reopen user windows.
+            var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+            arguments["ApplePersistenceIgnoreState"] = true
+            UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+        }
         let application = NSApplication.shared
         let delegate = AppDelegate()
         application.delegate = delegate
@@ -26,6 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     private lazy var updaterController = SPUStandardUpdaterController(
         startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
     private var preferencesController: NSWindowController?
+    private(set) var terminationPending = false
+    private var updateSavePending = false
     private var postponedUpdate: (() -> Void)?
     private let documents = LightNoteDocumentController()
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -48,14 +56,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
             return
         }
         NSApp.activate(ignoringOtherApps: true)
+        if CommandLine.arguments.contains("--quit-save-test") {
+            Task { @MainActor in
+                do { try await AppSelfTest.prepareQuitSavingTest() }
+                catch { fputs("QUIT_SAVE_TEST_FAILED: \(error)\n", stderr); exit(1) }
+            }
+            return
+        }
         if CommandLine.arguments.contains("--self-test") {
-            do {
-                try AppSelfTest.run()
-                print("APP_SELF_TEST_PASSED")
-                exit(0)
-            } catch {
-                fputs("APP_SELF_TEST_FAILED: \(error)\n", stderr)
-                exit(1)
+            if CommandLine.arguments.contains("--save-tests-only") {
+                Task { @MainActor in
+                    do {
+                        try await AppSelfTest.testBackgroundSaving()
+                        print("APP_SELF_TEST_PASSED")
+                        exit(0)
+                    } catch {
+                        fputs("APP_SELF_TEST_FAILED: \(error)\n", stderr)
+                        exit(1)
+                    }
+                }
+            } else {
+                // Synthetic event fixtures deliberately clean up temporary documents
+                // synchronously; keep them isolated from asynchronous lifecycle tests.
+                do { try AppSelfTest.run(); print("APP_SELF_TEST_PASSED"); exit(0) }
+                catch { fputs("APP_SELF_TEST_FAILED: \(error)\n", stderr); exit(1) }
             }
             return
         }
@@ -134,14 +158,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         if menuItem.action == #selector(redoDocument(_:)) { return currentUndoManager?.canRedo ?? false }
         return true
     }
+    /// Used by both quit and updater relaunch. Recheck all documents after awaits,
+    /// including live input completed while another document was being saved.
+    func flushDocumentsBeforeExit() async throws {
+        repeat {
+            for case let document as NoteDocument in documents.documents { document.state.finishInput?() }
+            for case let document as NoteDocument in documents.documents { try await document.persistLatest() }
+            for case let document as NoteDocument in documents.documents { document.state.finishInput?() }
+        } while documents.documents.contains { $0.hasUnautosavedChanges }
+    }
     @objc func checkForUpdates(_ sender: Any?) {
-        if let install = postponedUpdate {
+        if postponedUpdate != nil { saveBeforeInstallingUpdate() }
+        else { updaterController.checkForUpdates(sender) }
+    }
+    private func saveBeforeInstallingUpdate() {
+        guard !updateSavePending else { return }
+        updateSavePending = true
+        Task { @MainActor in
+            defer { updateSavePending = false }
             do {
-                for case let document as NoteDocument in documents.documents { try document.persistNow() }
-                postponedUpdate = nil
-                install()
+                try await flushDocumentsBeforeExit()
+                // Sparkle may terminate NSApp synchronously. Invoke outside the
+                // current main-queue task so AppKit's nested quit loop can run jobs.
+                RunLoop.main.perform(inModes: [.common]) {
+                    MainActor.assumeIsolated {
+                        let install = self.postponedUpdate
+                        self.postponedUpdate = nil
+                        install?()
+                    }
+                }
             } catch { NSApp.presentError(error) }
-        } else { updaterController.checkForUpdates(sender) }
+        }
     }
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         UpdateAvailability.shared.version = item.displayVersionString
@@ -151,23 +198,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     }
     func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem,
                  untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
-        do {
-            for case let document as NoteDocument in documents.documents { try document.persistNow() }
-            return false
-        } catch {
-            postponedUpdate = installHandler
-            NSApp.presentError(error)
-            return true
-        }
+        postponedUpdate = installHandler
+        saveBeforeInstallingUpdate()
+        return true
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        do {
-            for case let document as NoteDocument in documents.documents { try document.persistNow() }
-            return .terminateNow
-        } catch {
-            sender.presentError(error)
-            return .terminateCancel
+        guard !terminationPending else { return .terminateLater }
+        terminationPending = true
+        Task { @MainActor in
+            do {
+                try await flushDocumentsBeforeExit()
+                terminationPending = false
+                sender.reply(toApplicationShouldTerminate: true)
+            } catch {
+                terminationPending = false
+                sender.reply(toApplicationShouldTerminate: false)
+                if CommandLine.arguments.contains("--self-test") {
+                    fputs("EXPECTED_QUIT_SAVE_ERROR: \(error)\n", stderr)
+                } else { sender.presentError(error) }
+            }
         }
+        return .terminateLater
     }
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
         false

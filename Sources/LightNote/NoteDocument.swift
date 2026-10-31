@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import OSLog
+import os
 
 enum InkTool {
     case pen, eraser, selection, laser, ellipse, rectangle, arrow
@@ -19,6 +20,27 @@ enum InkTool {
         case .ellipse, .rectangle: "드래그하여 그리기 · ⌘ 정원 / 정사각형"
         case .laser: "다시 누르면 진하게 복원 · 떼면 2초간 서서히 사라짐"
         }
+    }
+}
+
+/// All access to the value is scoped by the same lock. The yielding accessors
+/// preserve in-place edits when no save retains a copy (no permanent mirror).
+private final class NoteStorage: @unchecked Sendable {
+    private let lock = NSRecursiveLock()
+    private var contents = NoteFile()
+    var value: NoteFile {
+        _read {
+            lock.lock(); defer { lock.unlock() }
+            yield contents
+        }
+        _modify {
+            lock.lock(); defer { lock.unlock() }
+            yield &contents
+        }
+    }
+    func snapshot() -> NoteFile {
+        lock.lock(); defer { lock.unlock() }
+        return contents
     }
 }
 
@@ -56,7 +78,12 @@ final class NoteState: NSObject, ObservableObject {
     @Published var canUndo = false
     @Published var canRedo = false
     // Mutations occur on the main thread; input samples never trigger SwiftUI updates.
-    var note = NoteFile()
+    nonisolated private let storage = NoteStorage()
+    var note: NoteFile {
+        _read { yield storage.value }
+        _modify { yield &storage.value }
+    }
+    nonisolated func savingSnapshot() -> NoteFile { storage.snapshot() }
     var finishInput: (() -> Void)?
     var invalidate: ((CGRect?) -> Void)?
     weak var document: NoteDocument?
@@ -90,6 +117,15 @@ final class NoteDocument: NSDocument {
         state.document = self
         hasUndoManager = true
     }
+    // AppKit serializes file access and tracks the save's change-count token.
+    // Only the immutable NoteFile snapshot crosses into its writing thread.
+    nonisolated private let saveTestObserver = OSAllocatedUnfairLock<(@Sendable (NoteFile, Bool) throws -> Void)?>(initialState: nil)
+    func observeSavesForTesting(_ observer: (@Sendable (NoteFile, Bool) throws -> Void)?) {
+        precondition(CommandLine.arguments.contains("--self-test"))
+        saveTestObserver.withLock { $0 = observer }
+    }
+    nonisolated override func canAsynchronouslyWrite(to url: URL, ofType typeName: String,
+                                                    for saveOperation: NSDocument.SaveOperationType) -> Bool { true }
     override class var autosavesInPlace: Bool { true }
     override class var autosavesDrafts: Bool { false }
     override class func canConcurrentlyReadDocuments(ofType typeName: String) -> Bool { false }
@@ -118,23 +154,23 @@ final class NoteDocument: NSDocument {
         UserDefaults.standard.set(fileURL.path, forKey: LightNoteDocumentController.lastDocumentKey)
     }
 
-    /// Assign a real file before the first close; use NSDocument's safe replacement writer.
+    private func destinationForSaving(directory: URL? = nil) throws -> URL {
+        if let fileURL { return fileURL }
+        let folder = directory ?? LightNoteDocumentController.notesDirectory
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var number = 1
+        var candidate = folder.appendingPathComponent("새 노트.lightnote")
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            number += 1
+            candidate = folder.appendingPathComponent("새 노트 \(number).lightnote")
+        }
+        return candidate
+    }
+    /// Synchronous helper for initial empty files and isolated diagnostics only.
     func persistNow(directory: URL? = nil) throws {
         state.finishInput?()
         let type = fileType ?? "com.lightnote.note"
-        let destination: URL
-        if let fileURL { destination = fileURL }
-        else {
-            let folder = directory ?? LightNoteDocumentController.notesDirectory
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            var number = 1
-            var candidate = folder.appendingPathComponent("새 노트.lightnote")
-            while FileManager.default.fileExists(atPath: candidate.path) {
-                number += 1
-                candidate = folder.appendingPathComponent("새 노트 \(number).lightnote")
-            }
-            destination = candidate
-        }
+        let destination = try destinationForSaving(directory: directory)
         try writeSafely(to: destination, ofType: type, for: .saveOperation)
         fileURL = destination
         fileType = type
@@ -143,12 +179,38 @@ final class NoteDocument: NSDocument {
         updateChangeCount(.changeCleared)
         rememberLastDocument()
     }
+    /// Finish current input and save through AppKit's asynchronous, ordered safe writer.
+    /// A successful old snapshot must not clear edits made while it was being written.
+    func persistLatest(directory: URL? = nil) async throws {
+        state.finishInput?()
+        repeat {
+            let destination = try destinationForSaving(directory: directory)
+            try await save(to: destination, ofType: fileType ?? "com.lightnote.note", for: .saveOperation)
+            state.finishInput?()
+        } while hasUnautosavedChanges
+        rememberLastDocument()
+    }
     override func canClose(withDelegate delegate: Any, shouldClose shouldCloseSelector: Selector?,
                            contextInfo: UnsafeMutableRawPointer?) {
-        do { try persistNow() }
-        catch { NSApp.presentError(error) }
-        // On errors retain AppKit's unsaved-document review instead of discarding edits.
+        state.finishInput?()
+        // autosavesInPlace makes AppKit wait for non-cancellable async saving before
+        // granting close. Its normal error/recovery UI remains in charge of failures.
         super.canClose(withDelegate: delegate, shouldClose: shouldCloseSelector, contextInfo: contextInfo)
+    }
+
+    // The canvas edits a value model directly, outside Cocoa text bindings. Record
+    // each model mutation explicitly, including edits made while an older save runs.
+    // Ignore UndoManager's group notifications to avoid counting a mutation twice.
+    override func updateChangeCount(_ change: NSDocument.ChangeType) {
+        switch change {
+        case .changeDone, .changeUndone, .changeRedone: return
+        default: super.updateChangeCount(change)
+        }
+    }
+    private func contentDidChange() {
+        if undoManager?.isUndoing == true { super.updateChangeCount(.changeUndone) }
+        else if undoManager?.isRedoing == true { super.updateChangeCount(.changeRedone) }
+        else { super.updateChangeCount(.changeDone) }
     }
 
     func setPaperStyle(_ style: PaperStyle) {
@@ -158,6 +220,7 @@ final class NoteDocument: NSDocument {
         undoManager?.registerUndo(withTarget: self) { target in target.setPaperStyle(previous) }
         undoManager?.setActionName("용지 변경")
         state.invalidate?(nil)
+        contentDidChange()
         state.refresh()
     }
 
@@ -171,6 +234,7 @@ final class NoteDocument: NSDocument {
         undoManager?.setActionName(actionName)
         let dirty = removed.reduce(CGRect.null) { $0.union($1.1.bounds) }
         state.invalidate?(dirty)
+        contentDidChange()
         state.refresh()
     }
     private func restoreStrokes(_ removed: [(Int, InkStroke)], actionName: String) {
@@ -180,6 +244,7 @@ final class NoteDocument: NSDocument {
         undoManager?.setActionName(actionName)
         let dirty = removed.reduce(CGRect.null) { $0.union($1.1.bounds) }
         state.invalidate?(dirty)
+        contentDidChange()
         state.refresh()
     }
 
@@ -226,6 +291,7 @@ final class NoteDocument: NSDocument {
         undoManager?.setActionName(actionName)
         state.invalidateStrokeCache?(Set(previous.map(\.id)))
         state.invalidate?(dirty)
+        contentDidChange()
         state.refresh()
     }
 
@@ -237,6 +303,7 @@ final class NoteDocument: NSDocument {
         undoManager?.registerUndo(withTarget: self) { target in target.eraseStrokes(ids: ids, actionName: actionName) }
         undoManager?.setActionName(actionName)
         state.invalidate?(strokes.reduce(CGRect.null) { $0.union($1.bounds) })
+        contentDidChange()
         state.refresh()
     }
 
@@ -246,6 +313,7 @@ final class NoteDocument: NSDocument {
         undoManager?.registerUndo(withTarget: self) { target in target.remove(at: index) }
         undoManager?.setActionName("필기")
         state.invalidate?(stroke.bounds)
+        contentDidChange()
         state.refresh()
     }
     private func remove(at index: Int) {
@@ -254,6 +322,7 @@ final class NoteDocument: NSDocument {
         undoManager?.registerUndo(withTarget: self) { target in target.insert(stroke, at: index) }
         undoManager?.setActionName("필기")
         state.invalidate?(stroke.bounds)
+        contentDidChange()
         state.refresh()
     }
     private func insert(_ stroke: InkStroke, at index: Int) {
@@ -261,6 +330,7 @@ final class NoteDocument: NSDocument {
         undoManager?.registerUndo(withTarget: self) { target in target.remove(at: index) }
         undoManager?.setActionName("필기")
         state.invalidate?(stroke.bounds)
+        contentDidChange()
         state.refresh()
     }
     @objc func undoInk(_ sender: Any?) {
@@ -274,13 +344,18 @@ final class NoteDocument: NSDocument {
         state.refresh()
     }
 
-    override func data(ofType typeName: String) throws -> Data {
-        // NSDocument schedules autosave, handles safe replacement and presents write errors.
-        // Encoding happens at save boundaries, never in mouseDragged.
-        // Autosave may run while the mouse is held down. Save completed strokes only;
-        // never terminate the live stroke or drop its subsequent drag events here.
-        let data = try state.note.encoded()
-        log.info("Serialized strokes=\(self.state.note.strokes.count) bytes=\(data.count)")
+    nonisolated override func data(ofType typeName: String) throws -> Data {
+        // AppKit blocks main-thread interaction until we release it below. The
+        // lock also covers direct diagnostic calls and any overlapping model access.
+        // Do not dispatch to main here: AppKit may be synchronously waiting for us.
+        let snapshot = state.savingSnapshot()
+        // Release interaction BEFORE encoding. Later edits use Swift copy-on-write;
+        // AppKit's token leaves those edits dirty when this snapshot finishes.
+        unblockUserInteraction()
+        let observer = saveTestObserver.withLock { $0 }
+        try observer?(snapshot, Thread.isMainThread)
+        let data = try snapshot.encoded()
+        log.info("Serialized strokes=\(snapshot.strokes.count) bytes=\(data.count)")
         return data
     }
     override func read(from data: Data, ofType typeName: String) throws {

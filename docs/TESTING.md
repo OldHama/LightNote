@@ -184,3 +184,17 @@ V로 여러 글씨·도형을 선택하고 ⌘C, ⌘V를 누릅니다. 원본은
 ## 저장 성능 벤치마크
 
 `./scripts/benchmark-saving.sh`는 설치된 앱을 변경하지 않고 최적화된 별도 진단 실행 파일로 합성 문서의 실제 저장 경로와 백그라운드 시제품을 측정합니다. 방법·제약·결과는 [SAVE_PERFORMANCE.md](SAVE_PERFORMANCE.md), 원본 수치는 [SAVE_BENCHMARK.csv](SAVE_BENCHMARK.csv)를 참고합니다.
+
+## 실제 백그라운드 저장·종료 회귀 검사 (0.7.0)
+
+빌드 후 아래 세 검사를 각각 별도 프로세스로 실행합니다. 합성 UI 입력 검사는 임시 문서를 동기 정리하므로 비동기 저장 검사와 프로세스를 분리합니다. 개인 노트와 마지막 문서 설정은 사용하지 않습니다.
+
+```sh
+/Applications/LightNote.app/Contents/MacOS/LightNote --self-test
+/Applications/LightNote.app/Contents/MacOS/LightNote --self-test --save-tests-only
+python3 scripts/test-saving-lifecycle.py /Applications/LightNote.app/Contents/MacOS/LightNote
+```
+
+저장 작업을 결정적으로 일시 정지한 뒤 새 획·이동, 겹친 저장, 창 닫기, 여러 문서 종료 저장을 검사합니다. 오래된 스냅샷 저장 후 새 편집의 dirty 상태, Undo/Redo의 dirty 상태 복원, 파일 재독해 일치 여부를 확인합니다. 쓰기 오류 주입과 존재하지 않는 부모 디렉터리의 실제 쓰기 실패에서 원본 파일 보존·미저장 상태·재시도를 검사합니다. 마지막 검사는 실제 NSApplication 종료를 실행하는 별도 프로세스 두 개로, 성공 후 최신 파일과 종료 실패 취소를 확인합니다. OS 전원 차단·프로세스 강제 종료·네트워크 드라이브·iCloud 충돌 복구는 별도 검증 대상입니다.
+
+`./scripts/benchmark-saving.sh --save-benchmark-applied`는 시제품 대신 실제 AppKit 비동기 저장 경로의 응답 간격을 측정합니다.
