@@ -113,6 +113,26 @@ final class InkTests: XCTestCase {
         XCTAssertFalse(ellipse.intersectsEraser(from: CGPoint(x: 50, y: 30), to: CGPoint(x: 50, y: 30), radius: 1))
     }
 
+    func testArrowsInAllDirectionsAndRoundtrip() throws {
+        let start = CGPoint(x: 100, y: 100)
+        for end in [CGPoint(x: 200, y: 100), CGPoint(x: 100, y: 200),
+                    CGPoint(x: 0, y: 100), CGPoint(x: 100, y: 0), CGPoint(x: 180, y: 150)] {
+            let arrow = InkStroke.shape(.arrow, from: start, to: end, constrained: false, color: .red, width: 2)!
+            XCTAssertEqual(arrow.tool, "arrow")
+            XCTAssertEqual(arrow.samples[0].point, start)
+            XCTAssertEqual(arrow.samples[1].point, end)
+            XCTAssertEqual(InkPathBuilder.make(stroke: arrow).points.count, 5)
+            let direction = CGPoint(x: end.x-start.x, y: end.y-start.y)
+            for i in [2, 4] {
+                let wing = arrow.samples[i].point
+                XCTAssertLessThan((wing.x-end.x)*direction.x + (wing.y-end.y)*direction.y, 0)
+            }
+            XCTAssertEqual(try NoteFile.decode(NoteFile(strokes: [arrow]).encoded()).strokes, [arrow])
+            XCTAssertTrue(arrow.intersectsEraser(from: end, to: end, radius: 1))
+        }
+        XCTAssertNil(InkStroke.shape(.arrow, from: start, to: start, constrained: false, color: .black, width: 1))
+    }
+
     func testDotBoundsAreNotEmpty() {
         let dot = InkStroke(width: 0.5, samples: [InkSample(x: 50, y: 60, time: 0)])
         XCTAssertFalse(dot.bounds.isEmpty)

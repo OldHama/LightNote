@@ -49,6 +49,10 @@ struct EditorView: View {
                         Image(systemName: "rectangle")
                             .foregroundStyle(state.tool == .rectangle ? Color.accentColor : .secondary)
                     }.help("사각형 · R · ⌘ 정사각형").accessibilityLabel("사각형")
+                    Button { state.selectTool(.arrow) } label: {
+                        Image(systemName: "arrow.up.right")
+                            .foregroundStyle(state.tool == .arrow ? Color.accentColor : .secondary)
+                    }.help("화살표 · A").accessibilityLabel("화살표")
                     ForEach(NoteState.colorPresets, id: \.key) { preset in
                         Button { state.color = preset.color } label: {
                             Circle().fill(Color(cgColor: preset.color.cgColor)).frame(width: 19, height: 19)

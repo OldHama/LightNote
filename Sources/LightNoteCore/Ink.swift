@@ -126,7 +126,7 @@ public struct NoteFile: Codable, Equatable, Sendable {
         }
         var ids = Set<UUID>()
         for stroke in strokes {
-            guard ids.insert(stroke.id).inserted, ["pen", "ellipse", "rectangle"].contains(stroke.tool),
+            guard ids.insert(stroke.id).inserted, ["pen", "ellipse", "rectangle", "arrow"].contains(stroke.tool),
                   stroke.width.isFinite, (0.1...100).contains(stroke.width),
                   !stroke.samples.isEmpty else { throw NoteError.invalidData }
             for c in [stroke.color.red, stroke.color.green, stroke.color.blue, stroke.color.alpha] {
@@ -219,6 +219,7 @@ public final class InkPathBuilder {
         builder.points = stroke.samples.map(\.point)
         let rect = stroke.pointBounds
         if stroke.tool == "ellipse" { builder.path.addEllipse(in: rect) }
+        else if stroke.tool == "arrow" { builder.path.addLines(between: builder.points) }
         else { builder.path.addRect(rect) }
         return builder
     }
@@ -238,7 +239,7 @@ public enum LaserTiming {
     }
 }
 
-public enum InkShapeKind: String, Sendable { case ellipse, rectangle }
+public enum InkShapeKind: String, Sendable { case ellipse, rectangle, arrow }
 
 extension InkStroke {
     public var pointBounds: CGRect {
@@ -254,6 +255,18 @@ extension InkStroke {
                              constrained: Bool, color: InkColor, width: Double,
                              id: UUID = UUID(), time: Double = 0) -> InkStroke? {
         var dx = end.x-start.x, dy = end.y-start.y
+        if kind == .arrow {
+            let length = hypot(dx, dy)
+            guard length >= 1 else { return nil }
+            let ux = dx/length, uy = dy/length
+            let head = min(length * 0.3, max(10, width*4))
+            let wing1 = CGPoint(x: end.x-ux*head-uy*head*0.5, y: end.y-uy*head+ux*head*0.5)
+            let wing2 = CGPoint(x: end.x-ux*head+uy*head*0.5, y: end.y-uy*head-ux*head*0.5)
+            var stroke = InkStroke(id: id, color: color, width: width,
+                samples: [start, end, wing1, end, wing2].map { InkSample(x: $0.x, y: $0.y, time: time) })
+            stroke.tool = "arrow"
+            return stroke
+        }
         if constrained {
             let size = max(abs(dx), abs(dy))
             dx = (dx < 0 ? -1 : 1) * size; dy = (dy < 0 ? -1 : 1) * size

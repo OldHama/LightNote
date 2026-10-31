@@ -177,7 +177,7 @@ final class InkCanvasView: NSView {
             name: NSApplication.willResignActiveNotification, object: nil)
     }
     private func toolCursor() -> NSCursor {
-        if [.selection, .laser, .ellipse, .rectangle].contains(state.tool) { return .crosshair }
+        if [.selection, .laser, .ellipse, .rectangle, .arrow].contains(state.tool) { return .crosshair }
         guard state.tool == .eraser else { return .arrow }
         // Use the actual canvas-to-window transform, matching event coordinate conversion.
         let diameter = abs(convert(NSSize(width: NoteState.eraserRadius * 2, height: 0), to: nil).width)
@@ -249,9 +249,9 @@ final class InkCanvasView: NSView {
         finishStroke(reason: "new-down")
         window?.makeFirstResponder(self)
         guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
-        if state.tool == .ellipse || state.tool == .rectangle {
+        if state.tool == .ellipse || state.tool == .rectangle || state.tool == .arrow {
             let point = convert(event.locationInWindow, from: nil)
-            shapeDraft = ShapeDraft(kind: state.tool == .ellipse ? .ellipse : .rectangle,
+            shapeDraft = ShapeDraft(kind: state.tool == .ellipse ? .ellipse : (state.tool == .arrow ? .arrow : .rectangle),
                 start: point, end: point, constrained: event.modifierFlags.contains(.command),
                 color: state.color, width: state.width)
             return
@@ -616,6 +616,10 @@ final class InkCanvasView: NSView {
             }
             if event.keyCode == 30 || event.charactersIgnoringModifiers == "]" {
                 state.adjustPenWidth(increase: true)
+                return
+            }
+            if event.keyCode == 0 || event.charactersIgnoringModifiers?.lowercased() == "a" {
+                state.selectTool(.arrow)
                 return
             }
             if event.keyCode == 8 || event.charactersIgnoringModifiers?.lowercased() == "c" {
