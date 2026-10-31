@@ -27,6 +27,7 @@ final class NoteState: ObservableObject {
     static let eraserRadius: CGFloat = 6
     var refreshCursor: (() -> Void)?
     var invalidateStrokeCache: ((Set<UUID>) -> Void)?
+    @Published var showShortcuts = false
     @Published var tool: InkTool = .pen
     func selectTool(_ tool: InkTool) {
         finishInput?()

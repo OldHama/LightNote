@@ -401,6 +401,12 @@ enum AppSelfTest {
         NSApp.mainMenu?.items.forEach { $0.submenu?.update() }
         try expect(NSApp.mainMenu?.performKeyEquivalent(with: redoKey) == true, "Command-Shift-Z not routed")
         try expect(doc.state.note.strokes == beforeKeyboardUndo, "Keyboard redo lost stroke: expected \(beforeKeyboardUndo.count), got \(doc.state.note.strokes.count)")
+        let beforeHelp = doc.state.note
+        canvas.keyDown(with: toolKey("/", code: 44))
+        try expect(doc.state.showShortcuts, "Slash did not open shortcut help")
+        doc.state.showShortcuts = false // The sheet close button and Escape dismiss this binding.
+        try expect(!doc.state.showShortcuts, "Help binding did not close")
+        try expect(doc.state.note == beforeHelp, "Help modified document")
         print("Verified: 100 taps; 2002-sample stroke; mid-stroke save continuity; style; undo/redo; interruption; dot pixels; grid pixels/style undo/redo; stroke eraser click/sweep/undo/redo/keys; rectangle selection/move/undo/redo/save; zoom transforms/ink/eraser/reset; outer viewport grid/input/reopen; shapes/command circle/corner resize/undo/redo; laser hold/release/expiry/non-persistence; managed note automatic save/reopen; disk roundtrip; corrupt read")
         doc.updateChangeCount(.changeCleared)
         doc.close()

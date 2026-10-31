@@ -19,6 +19,9 @@ struct EditorView: View {
                         Image(systemName: "arrow.down.circle")
                             .foregroundStyle(Color.accentColor)
                     }.help("새 버전 다운로드 및 업데이트").accessibilityLabel("업데이트 다운로드")
+                    Button { state.showShortcuts = true } label: {
+                        Image(systemName: "questionmark.circle")
+                    }.help("단축키 도움말 · /").accessibilityLabel("단축키 도움말")
                     Divider().frame(height: 22)
                     Button { state.document?.undoInk(nil) } label: { Image(systemName: "arrow.uturn.backward") }
                         .disabled(!state.canUndo).help("실행 취소 · ⌘Z").accessibilityLabel("실행 취소")
@@ -104,5 +107,71 @@ struct EditorView: View {
                 .padding(.horizontal, 18).frame(height: 30).background(.bar)
         }
         .frame(minWidth: 740, minHeight: 440)
+        .sheet(isPresented: $state.showShortcuts) { ShortcutHelpView() }
+    }
+}
+
+private struct ShortcutHelpView: View {
+    @Environment(\.dismiss) private var dismiss
+    private func row(_ keys: String, _ title: String) -> some View {
+        HStack(spacing: 18) {
+            Text(keys).font(.system(.body, design: .monospaced)).foregroundStyle(.primary)
+                .frame(width: 100, alignment: .leading)
+            Text(title).foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }.font(.system(size: 13)).padding(.vertical, 3)
+    }
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Image(systemName: "keyboard").foregroundStyle(.tint)
+                Text("단축키 도움말").font(.title3.weight(.semibold))
+                Spacer()
+                Button { dismiss() } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.borderless).keyboardShortcut(.cancelAction)
+                    .help("닫기 · Esc").accessibilityLabel("도움말 닫기")
+            }.padding(20)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("그리기 도구").font(.headline).padding(.bottom, 6)
+                    row("P", "펜")
+                    row("E", "획 지우개")
+                    row("V", "사각형 선택 · 내부 드래그로 이동")
+                    row("L", "레이저 · 떼면 1초 유지 후 2초간 사라짐")
+                    row("C", "원 · 타원")
+                    row("R", "사각형")
+                    row("A", "화살표")
+                    row("⌘ + 드래그", "원·사각형을 정원·정사각형으로 제한")
+                    row("[ / ]", "펜 두께 감소 / 증가")
+                    Divider().padding(.vertical, 12)
+                    Text("편집과 문서").font(.headline).padding(.bottom, 6)
+                    row("⌘ Z", "실행 취소")
+                    row("⌘ ⇧ Z", "다시 실행")
+                    row("⌫ / Delete", "선택한 획 삭제")
+                    row("Esc", "선택 해제 · 도형 취소 · 도움말 닫기")
+                    row("⌘ N", "새 노트")
+                    row("⌘ O", "노트 열기")
+                    row("⌘ S", "저장 · 평소에는 자동 저장")
+                    row("⌘ ⇧ S", "다른 이름으로 저장")
+                    row("⌃ ⌘ F", "전체 화면")
+                    row("/", "단축키 도움말 열기")
+                    Divider().padding(.vertical, 12)
+                    Text("펜 색상").font(.headline).padding(.bottom, 6)
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 12) {
+                        ForEach(NoteState.colorPresets, id: \.key) { preset in
+                            HStack(spacing: 12) {
+                                Text(preset.key).font(.system(.body, design: .monospaced))
+                                Circle().fill(Color(cgColor: preset.color.cgColor)).frame(width: 12, height: 12)
+                                Text(preset.name).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    Divider().padding(.vertical, 12)
+                    Text("두 손가락 스크롤로 이동 · 핀치로 확대/축소\n선택 상자의 모서리를 드래그하면 크기 변경\n도구 단축키는 텍스트 입력 중에는 작동하지 않습니다.")
+                        .font(.footnote).foregroundStyle(.secondary).lineSpacing(5)
+                }.padding(24)
+            }
+        }.frame(width: 520, height: 560)
     }
 }

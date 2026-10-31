@@ -596,6 +596,10 @@ final class InkCanvasView: NSView {
     override func keyDown(with event: NSEvent) {
         // Handle only canvas input, so text editors retain normal bracket typing.
         if event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty {
+            if event.keyCode == 44 || event.charactersIgnoringModifiers == "/" {
+                state.showShortcuts = true
+                return
+            }
             if state.tool == .selection, event.keyCode == 51 || event.keyCode == 117 {
                 guard !selectedIDs.isEmpty else { return }
                 finishStroke(reason: "selection-delete")
