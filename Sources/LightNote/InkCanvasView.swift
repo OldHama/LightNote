@@ -88,6 +88,16 @@ final class InkCanvasView: NSView {
         let points: [CGPoint]
     }
     let state: NoteState
+    private struct LaserTrace {
+        let path: CGPath
+        let bounds: CGRect
+        let releasedAt: TimeInterval
+    }
+    private var activeLaser: InkPathBuilder?
+    private var activeLaserBounds = CGRect.null
+    private var laserTraces: [LaserTrace] = []
+    private var laserTimer: Timer?
+    var visibleLaserTraceCount: Int { laserTraces.count + (activeLaser == nil ? 0 : 1) }
     private var cache: [UUID: CachedStroke] = [:]
     private var selectedIDs = Set<UUID>()
     private var marqueeStart: CGPoint?
@@ -138,7 +148,7 @@ final class InkCanvasView: NSView {
             name: NSApplication.willResignActiveNotification, object: nil)
     }
     private func toolCursor() -> NSCursor {
-        if state.tool == .selection { return .crosshair }
+        if state.tool == .selection || state.tool == .laser { return .crosshair }
         guard state.tool == .eraser else { return .arrow }
         // Use the actual canvas-to-window transform, matching event coordinate conversion.
         let diameter = abs(convert(NSSize(width: NoteState.eraserRadius * 2, height: 0), to: nil).width)
@@ -210,6 +220,12 @@ final class InkCanvasView: NSView {
         finishStroke(reason: "new-down")
         window?.makeFirstResponder(self)
         guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        if state.tool == .laser {
+            activeLaser = InkPathBuilder()
+            activeLaserBounds = .null
+            appendLaser(event)
+            return
+        }
         if state.tool == .selection {
             let point = convert(event.locationInWindow, from: nil)
             if let rect = selectionBounds, rect.contains(point) {
@@ -233,12 +249,18 @@ final class InkCanvasView: NSView {
         append(event)
     }
     override func mouseDragged(with event: NSEvent) {
+        if activeLaser != nil { appendLaser(event); return }
         if marqueeStart != nil || moveStart != nil { updateSelection(with: event); return }
         if erasingLast != nil { erase(with: event); return }
         guard active != nil else { return } // Never bridge a disconnected input session.
         append(event)
     }
     override func mouseUp(with event: NSEvent) {
+        if activeLaser != nil {
+            appendLaser(event)
+            finishLaser()
+            return
+        }
         if marqueeStart != nil || moveStart != nil {
             updateSelection(with: event)
             finishStroke(reason: "selection-up")
@@ -255,6 +277,7 @@ final class InkCanvasView: NSView {
     }
     override func tabletPoint(with event: NSEvent) {
         // AppKit may deliver independent tablet-point events between mouse events.
+        if activeLaser != nil { appendLaser(event); return }
         if marqueeStart != nil || moveStart != nil { updateSelection(with: event); return }
         if erasingLast != nil { erase(with: event); return }
         guard active != nil else { return }
@@ -262,6 +285,68 @@ final class InkCanvasView: NSView {
     }
     override func tabletProximity(with event: NSEvent) {
         if !event.isEnteringProximity { finishStroke(reason: "proximity-exit") }
+    }
+
+    private var laserPadding: CGFloat { 12 / (enclosingScrollView?.magnification ?? 1) }
+    private func appendLaser(_ event: NSEvent) {
+        guard let activeLaser else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        guard point.x.isFinite, point.y.isFinite else { return }
+        let previous = activeLaser.path.currentPoint
+        let last = activeLaser.lastPoint ?? point
+        activeLaser.append(point)
+        let segment = CGRect(x: min(previous.x, last.x, point.x), y: min(previous.y, last.y, point.y),
+                             width: max(previous.x, last.x, point.x)-min(previous.x, last.x, point.x),
+                             height: max(previous.y, last.y, point.y)-min(previous.y, last.y, point.y))
+        activeLaserBounds = activeLaserBounds.union(CGRect(origin: point, size: .zero))
+        setNeedsDisplay(segment.insetBy(dx: -laserPadding, dy: -laserPadding))
+    }
+    private func finishLaser() {
+        guard let activeLaser else { return }
+        activeLaser.finish()
+        laserTraces.append(LaserTrace(path: activeLaser.path.copy()!, bounds: activeLaserBounds,
+                                      releasedAt: ProcessInfo.processInfo.systemUptime))
+        self.activeLaser = nil
+        setNeedsDisplay(activeLaserBounds.insetBy(dx: -laserPadding, dy: -laserPadding))
+        if laserTimer == nil {
+            let timer = Timer(timeInterval: 1.0/60, repeats: true) { [weak self] timer in
+                guard let self else { timer.invalidate(); return }
+                MainActor.assumeIsolated {
+                    self.advanceLaser(now: ProcessInfo.processInfo.systemUptime)
+                }
+            }
+            laserTimer = timer
+            RunLoop.main.add(timer, forMode: .common)
+        }
+    }
+    func advanceLaser(now: TimeInterval) {
+        for trace in laserTraces {
+            setNeedsDisplay(trace.bounds.insetBy(dx: -laserPadding, dy: -laserPadding))
+        }
+        laserTraces.removeAll { LaserTiming.opacity(releasedAt: $0.releasedAt, now: now) <= 0 }
+        if laserTraces.isEmpty { laserTimer?.invalidate(); laserTimer = nil }
+    }
+    private func drawLaser(_ path: CGPath, tail: CGPoint?, opacity: Double, context: CGContext) {
+        guard opacity > 0 else { return }
+        let scale = enclosingScrollView?.magnification ?? 1
+        context.saveGState()
+        context.setAlpha(opacity)
+        context.setStrokeColor(CGColor(srgbRed: 1, green: 0.06, blue: 0.13, alpha: 1))
+        context.setFillColor(CGColor(srgbRed: 1, green: 0.06, blue: 0.13, alpha: 1))
+        context.setLineWidth(2.5 / scale)
+        context.setLineCap(.round)
+        context.setLineJoin(.round)
+        context.setShadow(offset: .zero, blur: 6 / scale,
+                          color: CGColor(srgbRed: 1, green: 0, blue: 0.1, alpha: 0.8))
+        if path.boundingBoxOfPath.size == .zero && (tail == nil || tail == path.currentPoint) {
+            let point = path.currentPoint, radius = 2 / scale
+            context.fillEllipse(in: CGRect(x: point.x-radius, y: point.y-radius, width: radius*2, height: radius*2))
+        } else {
+            context.addPath(path)
+            if let tail { context.addLine(to: tail) }
+            context.strokePath()
+        }
+        context.restoreGState()
     }
 
     private var selectionBounds: CGRect? {
@@ -372,6 +457,7 @@ final class InkCanvasView: NSView {
         erasingLast = point
     }
     func finishStroke(reason: String) {
+        finishLaser()
         finishSelection()
         if erasingLast != nil {
             erasingLast = nil
@@ -410,6 +496,10 @@ final class InkCanvasView: NSView {
             }
             if event.keyCode == 30 || event.charactersIgnoringModifiers == "]" {
                 state.adjustPenWidth(increase: true)
+                return
+            }
+            if event.keyCode == 37 || event.charactersIgnoringModifiers?.lowercased() == "l" {
+                state.selectTool(.laser)
                 return
             }
             if event.keyCode == 9 || event.charactersIgnoringModifiers?.lowercased() == "v" {
@@ -474,6 +564,11 @@ final class InkCanvasView: NSView {
             context.stroke(rect)
             context.restoreGState()
         }
+        let now = ProcessInfo.processInfo.systemUptime
+        for trace in laserTraces {
+            drawLaser(trace.path, tail: nil, opacity: LaserTiming.opacity(releasedAt: trace.releasedAt, now: now), context: context)
+        }
+        if let activeLaser { drawLaser(activeLaser.path, tail: activeLaser.lastPoint, opacity: 1, context: context) }
     }
     /// Grid coordinates are anchored to the paper, so scrolling and partial redraws agree.
     private func drawGrid(in dirtyRect: CGRect, context: CGContext) {

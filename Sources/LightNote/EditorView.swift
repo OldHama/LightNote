@@ -31,6 +31,10 @@ struct EditorView: View {
                         Image(systemName: "selection.pin.in.out")
                             .foregroundStyle(state.tool == .selection ? Color.accentColor : .secondary)
                     }.help("사각형 선택 · V").accessibilityLabel("사각형 선택")
+                    Button { state.selectTool(.laser) } label: {
+                        Image(systemName: "dot.scope")
+                            .foregroundStyle(state.tool == .laser ? Color.red : .secondary)
+                    }.help("레이저 · L").accessibilityLabel("레이저")
                     ForEach(NoteState.colorPresets, id: \.key) { preset in
                         Button { state.color = preset.color } label: {
                             Circle().fill(Color(cgColor: preset.color.cgColor)).frame(width: 19, height: 19)
@@ -66,9 +70,9 @@ struct EditorView: View {
             CanvasHost(state: state)
             Divider()
             HStack {
-                Label(state.tool == .pen ? "볼펜" : (state.tool == .selection ? "사각형 선택" : "획 지우개"), systemImage: state.tool == .pen ? "pencil.tip" : (state.tool == .selection ? "selection.pin.in.out" : "eraser"))
+                Label(state.tool.title, systemImage: state.tool.symbol)
                 Text("·").foregroundStyle(.tertiary)
-                Text(state.tool == .pen ? "일정한 굵기" : (state.tool == .selection ? "영역 선택 후 안쪽을 드래그하여 이동" : "닿은 획 전체 삭제"))
+                Text(state.tool.hint)
                 Spacer()
                 Button { state.resetZoom?() } label: {
                     Text("\(Int((state.zoom * 100).rounded()))%")

@@ -2,7 +2,23 @@ import AppKit
 import SwiftUI
 import OSLog
 
-enum InkTool { case pen, eraser, selection }
+enum InkTool {
+    case pen, eraser, selection, laser
+    var title: String {
+        switch self { case .pen: "볼펜"; case .eraser: "획 지우개"; case .selection: "사각형 선택"; case .laser: "레이저" }
+    }
+    var symbol: String {
+        switch self { case .pen: "pencil.tip"; case .eraser: "eraser"; case .selection: "selection.pin.in.out"; case .laser: "dot.scope" }
+    }
+    var hint: String {
+        switch self {
+        case .pen: "일정한 굵기"
+        case .eraser: "닿은 획 전체 삭제"
+        case .selection: "영역 선택 후 안쪽을 드래그하여 이동"
+        case .laser: "누르는 동안 유지 · 떼면 1초 후 2초간 서서히 사라짐"
+        }
+    }
+}
 
 @MainActor
 final class NoteState: ObservableObject {

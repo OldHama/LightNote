@@ -287,7 +287,27 @@ enum AppSelfTest {
         try expect(automaticReopen.state.note == managed.state.note, "Managed note reopen failed")
         automaticReopen.close()
         managed.close()
-        print("Verified: 100 taps; 2002-sample stroke; mid-stroke save continuity; style; undo/redo; interruption; dot pixels; grid pixels/style undo/redo; stroke eraser click/sweep/undo/redo/keys; rectangle selection/move/undo/redo/save; zoom transforms/ink/eraser/reset; outer viewport grid/input/reopen; managed note automatic save/reopen; disk roundtrip; corrupt read")
+        let beforeLaser = doc.state.note
+        let undoBeforeLaser = doc.undoManager?.canUndo
+        let laserKey = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+            timestamp: 700, windowNumber: window.windowNumber, context: nil,
+            characters: "l", charactersIgnoringModifiers: "l", isARepeat: false, keyCode: 37)!
+        canvas.keyDown(with: laserKey)
+        try expect(doc.state.tool == .laser, "L did not select laser")
+        canvas.mouseDown(with: event(.leftMouseDown, 100, 500, 701))
+        canvas.mouseDragged(with: event(.leftMouseDragged, 300, 550, 702))
+        canvas.advanceLaser(now: ProcessInfo.processInfo.systemUptime + 100)
+        try expect(canvas.visibleLaserTraceCount == 1, "Held laser expired")
+        let laserSnapshot = try NoteFile.decode(doc.data(ofType: "com.lightnote.note"))
+        try expect(laserSnapshot == beforeLaser, "Laser was saved as ink")
+        canvas.mouseUp(with: event(.leftMouseUp, 300, 550, 703))
+        try expect(canvas.visibleLaserTraceCount == 1, "Released laser vanished immediately")
+        canvas.advanceLaser(now: ProcessInfo.processInfo.systemUptime + 3.1)
+        try expect(canvas.visibleLaserTraceCount == 0, "Released laser did not expire")
+        try expect(doc.state.note == beforeLaser && doc.undoManager?.canUndo == undoBeforeLaser,
+                   "Laser changed ink or undo history")
+        doc.state.selectTool(.pen)
+        print("Verified: 100 taps; 2002-sample stroke; mid-stroke save continuity; style; undo/redo; interruption; dot pixels; grid pixels/style undo/redo; stroke eraser click/sweep/undo/redo/keys; rectangle selection/move/undo/redo/save; zoom transforms/ink/eraser/reset; outer viewport grid/input/reopen; laser hold/release/expiry/non-persistence; managed note automatic save/reopen; disk roundtrip; corrupt read")
         doc.updateChangeCount(.changeCleared)
         doc.close()
     }

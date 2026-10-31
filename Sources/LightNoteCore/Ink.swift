@@ -220,3 +220,11 @@ public final class InkPathBuilder {
         return builder
     }
 }
+
+/// Transient laser timing is separate from persistent ink and uses monotonic uptime.
+public enum LaserTiming {
+    public static func opacity(releasedAt: TimeInterval?, now: TimeInterval) -> Double {
+        guard let releasedAt else { return 1 }
+        return max(0, min(1, 1 - (now - releasedAt - 1) / 2))
+    }
+}
