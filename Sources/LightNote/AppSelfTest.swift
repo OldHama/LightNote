@@ -141,6 +141,18 @@ enum AppSelfTest {
         doc.redoInk(nil)
         try expect(doc.state.note.strokes == expectedMove, "Move redo not exact")
         doc.undoInk(nil)
+        let backspace = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+            timestamp: 417, windowNumber: window.windowNumber, context: nil,
+            characters: "\u{7f}", charactersIgnoringModifiers: "\u{7f}", isARepeat: false, keyCode: 51)!
+        begin(); canvas.keyDown(with: backspace); end()
+        try expect(doc.state.note.strokes == Array(beforeSelection.dropFirst(20)), "Backspace deleted wrong selection")
+        doc.undoInk(nil)
+        try expect(doc.state.note.strokes == beforeSelection, "Selection delete undo not exact")
+        doc.redoInk(nil)
+        try expect(doc.state.note.strokes == Array(beforeSelection.dropFirst(20)), "Selection delete redo failed")
+        doc.undoInk(nil)
+        canvas.keyDown(with: backspace)
+        try expect(doc.state.note.strokes == beforeSelection, "Backspace with no selection deleted ink")
         doc.state.selectTool(.pen)
         let scroll = InkScrollView(state: doc.state)
         window.contentView = scroll
