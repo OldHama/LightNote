@@ -5,7 +5,11 @@ configuration="${1:-debug}"
 # iCloud can reattach FinderInfo after signing. Keep executable bundles outside the synced tree.
 output_dir="${LIGHTNOTE_BUILD_DIR:-$HOME/Library/Caches/LightNote/Build}"
 app="$output_dir/LightNote.app"
-mkdir -p "$app/Contents/MacOS" build
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" build
+if [[ ! -f Resources/AppIcon.icns || Resources/AppIcon.png -nt Resources/AppIcon.icns ]]; then
+    ./scripts/make-icon.sh
+fi
+cp Resources/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 opt=-Onone
 if [[ "$configuration" == release ]]; then opt=-O; fi
 sdk="$(xcrun --sdk macosx --show-sdk-path)"

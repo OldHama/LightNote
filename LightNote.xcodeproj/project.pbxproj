@@ -1,5 +1,7 @@
 // !$*UTF8*$!
 { archiveVersion = 1; classes = {}; objectVersion = 56; objects = {
+A11C0A11C0A11C0A11C0A001 = { isa = PBXFileReference; lastKnownFileType = image.icns; path = "Resources/AppIcon.icns"; sourceTree = "<group>"; };
+A11C0A11C0A11C0A11C0A002 = { isa = PBXBuildFile; fileRef = A11C0A11C0A11C0A11C0A001; };
 9B784BCDD0A386D79D0BFA77 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/LightNote/AppMain.swift"; sourceTree = "<group>"; };
 5D1FEB7CF379C01A9D392ACA = { isa = PBXBuildFile; fileRef = 9B784BCDD0A386D79D0BFA77; };
 19FBCF6C411031E6058E3307 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/LightNote/AppSelfTest.swift"; sourceTree = "<group>"; };
@@ -15,10 +17,10 @@ C37E40CE5D4CE3F70F054470 = { isa = PBXFileReference; lastKnownFileType = sourcec
 7D1043473D55BFA90E8530D3 = { isa = PBXFileReference; explicitFileType = wrapper.application; path = LightNote.app; sourceTree = BUILT_PRODUCTS_DIR; };
 59BD0A3FF43B32849B319E64 = { isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 FBDC4F23F93125BBEEAE800C = { isa = PBXGroup; children = (7D1043473D55BFA90E8530D3,); name = Products; sourceTree = "<group>"; };
-64292B1C2B2E13EAD8788FC8 = { isa = PBXGroup; children = (9B784BCDD0A386D79D0BFA77,19FBCF6C411031E6058E3307,F460D8F63224550CB6E1B793,E843F4C82CF4078CE88533FD,31B3EC40D7D6DBF59D16BEAC,C37E40CE5D4CE3F70F054470,59BD0A3FF43B32849B319E64,FBDC4F23F93125BBEEAE800C,); sourceTree = "<group>"; };
+64292B1C2B2E13EAD8788FC8 = { isa = PBXGroup; children = (A11C0A11C0A11C0A11C0A001,9B784BCDD0A386D79D0BFA77,19FBCF6C411031E6058E3307,F460D8F63224550CB6E1B793,E843F4C82CF4078CE88533FD,31B3EC40D7D6DBF59D16BEAC,C37E40CE5D4CE3F70F054470,59BD0A3FF43B32849B319E64,FBDC4F23F93125BBEEAE800C,); sourceTree = "<group>"; };
 BCE16DD0260827ECF338C787 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (5D1FEB7CF379C01A9D392ACA,A20CC0245110140FDE977DFF,435C1226AE5D40258FA49CA3,28969F502505894C30B48BD4,F0253CDA1CBB7A6DAAB7CCE7,06D6C89A5D748AB3E8BDA17A,); runOnlyForDeploymentPostprocessing = 0; };
 7561BFB015D8F536760CB671 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-0189424A5A60FED329FA868E = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+0189424A5A60FED329FA868E = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A11C0A11C0A11C0A11C0A002,); runOnlyForDeploymentPostprocessing = 0; };
 89E1FD6268CC0F221A2BE178 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { SDKROOT = macosx; MACOSX_DEPLOYMENT_TARGET = 15.0; CLANG_ENABLE_MODULES = YES; SWIFT_VERSION = 6.0; SWIFT_STRICT_CONCURRENCY = complete; }; };
 7082CC0B6FC1282FCEABD07A = { isa = XCBuildConfiguration; name = Debug; buildSettings = { PRODUCT_NAME = LightNote; PRODUCT_BUNDLE_IDENTIFIER = com.lightnote.app; INFOPLIST_FILE = Info.plist; CODE_SIGN_STYLE = Automatic; CODE_SIGN_IDENTITY = "-"; ENABLE_HARDENED_RUNTIME = YES; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_EMIT_LOC_STRINGS = YES; GENERATE_INFOPLIST_FILE = NO; }; };
 E6DE6C99132752C914FEF632 = { isa = XCBuildConfiguration; name = Release; buildSettings = { SDKROOT = macosx; MACOSX_DEPLOYMENT_TARGET = 15.0; CLANG_ENABLE_MODULES = YES; SWIFT_VERSION = 6.0; SWIFT_STRICT_CONCURRENCY = complete; }; };

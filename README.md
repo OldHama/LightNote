@@ -1,5 +1,7 @@
 # LightNote — 가벼운 macOS 필기 앱
 
+<img src="Resources/AppIcon.png" alt="연필을 든 명호쌤 LightNote 아이콘" width="128">
+
 macOS 15 이상에서 실행하는 Swift / SwiftUI / AppKit 앱입니다. 외부 패키지, Electron, 웹뷰를 사용하지 않습니다. 벡터 필기, 모눈 용지, 획 지우개, 사각형 선택 이동, 핀치 확대·축소와 자동 저장을 지원하는 개발 중인 앱입니다.
 
 ## 구조와 설계
@@ -91,3 +93,5 @@ CPU·메모리·필기 지연에 대한 Instruments 측정값은 아직 없습�
 ## 이후 단계
 
 현재 미구현: 형광펜, 부분 지우개, 올가미, 다중 페이지, 추가 용지 유형 및 모눈 간격 변경, PDF, 노트/폴더 사이드바, 사용자 지정 단축키, 증분·백그라운드 저장. 다음 단계는 실제 Sidecar 입력 확인과 필기 엔진 계측입니다.
+
+아이콘 PNG와 macOS ICNS는 `Resources/`에 포함되어 있습니다. PNG를 변경한 후 `./scripts/make-icon.sh`로 다시 생성할 수 있습니다. [아이콘 제작 안내](docs/APP_ICON.md)
