@@ -8,6 +8,7 @@ if [[ ! -w "$install_dir" && -z "${LIGHTNOTE_INSTALL_DIR:-}" ]]; then
 fi
 mkdir -p "$install_dir"
 installed_app="$install_dir/LightNote.app"
+registry=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 if [[ "$source_app" == "$installed_app" ]]; then
     print -u2 'Source and installed app must be different paths.'
     exit 1
@@ -28,11 +29,12 @@ codesign --verify --deep --strict "$staged_app"
 if [[ -e "$installed_app" ]]; then
     backup_dir="$HOME/Library/Caches/LightNote/Previous"
     mkdir -p "$backup_dir"
+    "$registry" -u "$installed_app" >/dev/null 2>&1 || true
     mv "$installed_app" "$backup_dir/LightNote.$(date +%Y%m%d-%H%M%S).app"
 fi
 mv "$staged_app" "$installed_app"
-registry=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
-"$registry" -u "$source_app" || true
+touch "$installed_app"
+"$registry" -u "$source_app" >/dev/null 2>&1 || true
 "$registry" -f "$installed_app"
 # Preserve old workspace builds outside searchable project folders.
 backup_dir="$HOME/Library/Caches/LightNote/Previous"

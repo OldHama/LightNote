@@ -17,6 +17,11 @@ struct LightNoteMain {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let documents = LightNoteDocumentController()
     func applicationWillFinishLaunching(_ notification: Notification) {
+        // Set the running/Dock icon explicitly; old Launch Services entries may cache the placeholder.
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: url) {
+            NSApp.applicationIconImage = icon
+        }
         NSDocumentController.shared.autosavingDelay = 2
         installMenu()
     }
