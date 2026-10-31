@@ -190,7 +190,7 @@ final class InkCanvasView: NSView {
             name: NSApplication.willResignActiveNotification, object: nil)
     }
     private func toolCursor() -> NSCursor {
-        if [.selection, .laser, .ellipse, .rectangle, .arrow].contains(state.tool) { return .crosshair }
+        if [.selection, .laser, .ellipse, .rectangle, .arrow, .freeArrow].contains(state.tool) { return .crosshair }
         guard state.tool == .eraser else { return .arrow }
         // Use the actual canvas-to-window transform, matching event coordinate conversion.
         let diameter = abs(convert(NSSize(width: NoteState.eraserRadius * 2, height: 0), to: nil).width)
@@ -309,6 +309,7 @@ final class InkCanvasView: NSView {
             return
         }
         active = InkStroke(color: state.color, width: state.width, samples: [])
+        if state.tool == .freeArrow { active?.tool = "freeArrow" }
         liveInk = InkPathBuilder()
         diagnosticEvents = 0; diagnosticTabletEvents = 0
         append(event)
@@ -617,6 +618,7 @@ final class InkCanvasView: NSView {
         lastTimestamp = event.timestamp
         diagnosticEvents += 1
         if tablet { diagnosticTabletEvents += 1 }
+        let previousHead = active?.freeArrowHeadBounds ?? .null
         let previous = active?.samples.last?.point
         active?.samples.append(sample)
         if point.x >= bounds.maxX || point.y >= bounds.maxY {
@@ -634,7 +636,8 @@ final class InkCanvasView: NSView {
                                 width: max(changedStart.x, start.x, point.x) - min(changedStart.x, start.x, point.x),
                                 height: max(changedStart.y, start.y, point.y) - min(changedStart.y, start.y, point.y))
             .insetBy(dx: -radius, dy: -radius)
-        setNeedsDisplay(dirty.union(curveDirty))
+        let headDirty = previousHead.union(active?.freeArrowHeadBounds ?? .null).insetBy(dx: -radius, dy: -radius)
+        setNeedsDisplay(dirty.union(curveDirty).union(headDirty))
     }
     private func erase(with event: NSEvent) {
         guard let previous = erasingLast else { return }
@@ -669,7 +672,12 @@ final class InkCanvasView: NSView {
         guard let stroke = active, !stroke.samples.isEmpty else { return }
         active = nil
         liveInk.finish()
-        cache[stroke.id] = CachedStroke(path: liveInk.path.copy()!, bounds: stroke.bounds, points: liveInk.points)
+        if stroke.tool == "freeArrow" {
+            let geometry = InkPathBuilder.make(stroke: stroke)
+            cache[stroke.id] = CachedStroke(path: geometry.path.copy()!, bounds: stroke.bounds, points: geometry.points)
+        } else {
+            cache[stroke.id] = CachedStroke(path: liveInk.path.copy()!, bounds: stroke.bounds, points: liveInk.points)
+        }
         state.document?.append(stroke)
         log.debug("Stroke samples=\(stroke.samples.count) events=\(self.diagnosticEvents) tablet=\(self.diagnosticTabletEvents) finish=\(reason, privacy: .public)")
         liveInk = InkPathBuilder()
@@ -701,6 +709,10 @@ final class InkCanvasView: NSView {
             }
             if event.keyCode == 30 || event.charactersIgnoringModifiers == "]" {
                 state.adjustPenWidth(increase: true)
+                return
+            }
+            if event.keyCode == 12 || event.charactersIgnoringModifiers?.lowercased() == "q" {
+                state.selectTool(.freeArrow)
                 return
             }
             if event.keyCode == 0 || event.charactersIgnoringModifiers?.lowercased() == "a" {
@@ -788,7 +800,14 @@ final class InkCanvasView: NSView {
             let geometry = InkPathBuilder.make(stroke: shape)
             render(shape, path: geometry.path, in: context)
         }
-        if let active { render(active, path: liveInk.path, tail: liveInk.lastPoint, in: context) }
+        if let active {
+            render(active, path: liveInk.path, tail: liveInk.lastPoint, in: context)
+            let head = active.freeArrowHead
+            if !head.isEmpty {
+                context.beginPath(); context.addLines(between: head)
+                context.strokePath()
+            }
+        }
         if state.tool == .selection,
            let rect = marqueeRect ?? selectionBounds?.applying(selectionTransform) {
             let scale = enclosingScrollView?.magnification ?? 1

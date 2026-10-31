@@ -41,12 +41,12 @@ enum RecoveryLocations {
 }
 
 enum InkTool {
-    case pen, eraser, selection, laser, ellipse, rectangle, arrow
+    case pen, eraser, selection, laser, ellipse, rectangle, arrow, freeArrow
     var title: String {
-        switch self { case .pen: "볼펜"; case .eraser: "획 지우개"; case .selection: "사각형 선택"; case .laser: "레이저"; case .ellipse: "원 / 타원"; case .rectangle: "사각형"; case .arrow: "화살표" }
+        switch self { case .pen: "볼펜"; case .eraser: "획 지우개"; case .selection: "사각형 선택"; case .laser: "레이저"; case .ellipse: "원 / 타원"; case .rectangle: "사각형"; case .arrow: "화살표"; case .freeArrow: "자유 화살표" }
     }
     var symbol: String {
-        switch self { case .pen: "pencil.tip"; case .eraser: "eraser"; case .selection: "selection.pin.in.out"; case .laser: "dot.scope"; case .ellipse: "circle"; case .rectangle: "rectangle"; case .arrow: "arrow.up.right" }
+        switch self { case .pen: "pencil.tip"; case .eraser: "eraser"; case .selection: "selection.pin.in.out"; case .laser: "dot.scope"; case .ellipse: "circle"; case .rectangle: "rectangle"; case .arrow: "arrow.up.right"; case .freeArrow: "arrow.turn.up.right" }
     }
     var hint: String {
         switch self {
@@ -54,6 +54,7 @@ enum InkTool {
         case .eraser: "닿은 획 전체 삭제"
         case .selection: "영역 선택 후 안쪽을 드래그하여 이동"
         case .arrow: "드래그한 방향으로 화살표 그리기"
+        case .freeArrow: "펜처럼 그리고 끝에 화살촉 붙이기"
         case .ellipse, .rectangle: "드래그하여 그리기 · ⌘ 정원 / 정사각형"
         case .laser: "다시 누르면 진하게 복원 · 떼면 2초간 서서히 사라짐"
         }

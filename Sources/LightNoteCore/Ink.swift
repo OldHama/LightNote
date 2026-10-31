@@ -79,6 +79,10 @@ public struct InkStroke: Codable, Equatable, Sendable, Identifiable {
             minX = min(minX, p.x); maxX = max(maxX, p.x)
             minY = min(minY, p.y); maxY = max(maxY, p.y)
         }
+        for point in freeArrowHead {
+            minX = min(minX, point.x); maxX = max(maxX, point.x)
+            minY = min(minY, point.y); maxY = max(maxY, point.y)
+        }
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
             .insetBy(dx: -width / 2 - 2, dy: -width / 2 - 2)
     }
@@ -128,7 +132,7 @@ public struct NoteFile: Codable, Equatable, Sendable {
         }
         var ids = Set<UUID>()
         for stroke in strokes {
-            guard ids.insert(stroke.id).inserted, ["pen", "ellipse", "rectangle", "arrow", "image"].contains(stroke.tool),
+            guard ids.insert(stroke.id).inserted, ["pen", "ellipse", "rectangle", "arrow", "freeArrow", "image"].contains(stroke.tool),
                   stroke.width.isFinite, (0.1...100).contains(stroke.width),
                   !stroke.samples.isEmpty else { throw NoteError.invalidData }
             if stroke.tool == "image" {
@@ -224,6 +228,12 @@ public final class InkPathBuilder {
     }
     public static func make(stroke: InkStroke) -> InkPathBuilder {
         guard stroke.tool != "pen" else { return make(samples: stroke.samples) }
+        if stroke.tool == "freeArrow" {
+            let builder = make(samples: stroke.samples)
+            let head = stroke.freeArrowHead
+            if !head.isEmpty { builder.path.addLines(between: head); builder.points.append(contentsOf: head) }
+            return builder
+        }
         let builder = InkPathBuilder()
         builder.points = stroke.samples.map(\.point)
         let rect = stroke.pointBounds
@@ -311,5 +321,51 @@ extension InkStroke {
             copy.samples[index].y += offset.height
         }
         return copy
+    }
+}
+
+
+extension InkStroke {
+    /// A short arc-length lookback stabilizes release jitter without straightening the shaft.
+    /// Only the recent tail is visited, so live preview does not rescan long strokes.
+    public var freeArrowHead: [CGPoint] {
+        guard tool == "freeArrow", let tip = samples.last?.point, samples.count > 1 else { return [] }
+        let desired = max(10, width * 4)
+        let lookback = min(8, max(4, desired * 0.6))
+        let budget = desired / 0.35
+        var length: CGFloat = 0
+        var previous = tip
+        var anchor: CGPoint?
+        var nearest: CGPoint?
+        for sample in samples.dropLast().reversed() {
+            let point = sample.point
+            let distance = hypot(point.x-previous.x, point.y-previous.y)
+            guard distance > 0 else { continue }
+            if nearest == nil { nearest = point }
+            if anchor == nil, length + distance >= lookback {
+                let t = (lookback-length)/distance
+                anchor = CGPoint(x: previous.x+(point.x-previous.x)*t, y: previous.y+(point.y-previous.y)*t)
+            }
+            length += distance
+            previous = point
+            if length >= budget { break }
+        }
+        guard length >= 1 else { return [] }
+        var start = anchor ?? previous
+        if hypot(tip.x-start.x, tip.y-start.y) < 0.0001, let nearest { start = nearest }
+        let distance = hypot(tip.x-start.x, tip.y-start.y)
+        guard distance > 0.0001 else { return [] }
+        let ux = (tip.x-start.x)/distance, uy = (tip.y-start.y)/distance
+        let size = min(desired, length * 0.35)
+        return [CGPoint(x: tip.x-ux*size-uy*size*0.5, y: tip.y-uy*size+ux*size*0.5),
+                tip, CGPoint(x: tip.x-ux*size+uy*size*0.5, y: tip.y-uy*size-ux*size*0.5)]
+    }
+    public var freeArrowHeadBounds: CGRect {
+        let head = freeArrowHead
+        guard let first = head.first else { return .null }
+        return head.dropFirst().reduce(CGRect(origin: first, size: .zero)) { rect, point in
+            CGRect(x: min(rect.minX,point.x), y: min(rect.minY,point.y),
+                   width: max(rect.maxX,point.x)-min(rect.minX,point.x), height: max(rect.maxY,point.y)-min(rect.minY,point.y))
+        }
     }
 }

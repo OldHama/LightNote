@@ -58,6 +58,10 @@ struct EditorView: View {
                         Image(systemName: "rectangle")
                             .foregroundStyle(state.tool == .rectangle ? Color.accentColor : .secondary)
                     }.help("사각형 · R · ⌘ 정사각형").accessibilityLabel("사각형")
+                    Button { state.selectTool(.freeArrow) } label: {
+                        Image(systemName: "arrow.turn.up.right")
+                            .foregroundStyle(state.tool == .freeArrow ? Color.accentColor : .secondary)
+                    }.help("자유 화살표 · Q").accessibilityLabel("자유 화살표")
                     Button { state.selectTool(.arrow) } label: {
                         Image(systemName: "arrow.up.right")
                             .foregroundStyle(state.tool == .arrow ? Color.accentColor : .secondary)
@@ -161,6 +165,7 @@ private struct ShortcutHelpView: View {
                     row("L", "레이저 · 다시 누르면 복원, 떼면 2초간 사라짐")
                     row("C", "원 · 타원")
                     row("R", "사각형")
+                    row("Q", "펜처럼 그리는 자유 화살표")
                     row("A", "화살표")
                     row("⌘ + 드래그", "원·사각형을 정원·정사각형으로 제한")
                     row("[ / ]", "펜 두께 감소 / 증가")

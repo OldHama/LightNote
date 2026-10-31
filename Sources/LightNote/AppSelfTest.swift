@@ -504,8 +504,34 @@ enum AppSelfTest {
         destinationDoc.undoManager?.endUndoGrouping()
         try expect(destinationDoc.state.note.strokes.last!.imagePNG == imageObject.imagePNG && destinationDoc.state.note.strokes.last!.bounds.width > imageObject.bounds.width, "Image resize damaged payload")
         destinationDoc.updateChangeCount(.changeCleared); destinationDoc.close()
+        canvas.keyDown(with: toolKey("q", code: 12))
+        try expect(doc.state.tool == .freeArrow, "Q did not select free arrow")
+        let freeBefore = doc.state.note.strokes
+        begin()
+        canvas.mouseDown(with: event(.leftMouseDown, 3000, 2050, 1100))
+        for (i,p) in [CGPoint(x:3020,y:2010),CGPoint(x:3080,y:1990),CGPoint(x:3140,y:2030),CGPoint(x:3190,y:2100)].enumerated() {
+            canvas.mouseDragged(with: event(.leftMouseDragged,p.x,p.y,1101+Double(i)))
+        }
+        canvas.mouseUp(with:event(.leftMouseUp,3230,2150,1106)); end()
+        let free = doc.state.note.strokes.last!
+        try expect(free.tool == "freeArrow" && free.samples.count == 6 && free.freeArrowHead.count == 3, "Free arrow lost curve or head")
+        let freeSaved = try NoteFile.decode(doc.data(ofType:"com.lightnote.note"))
+        try expect(freeSaved.strokes.last == free, "Free arrow save failed")
+        doc.undoInk(nil); try expect(doc.state.note.strokes == freeBefore, "Free arrow not one undo action")
+        doc.redoInk(nil); try expect(doc.state.note.strokes.last == free, "Free arrow redo failed")
+        canvas.keyDown(with:toolKey("v",code:9)); canvas.keyDown(with:toolKey("\u{1b}",code:53))
+        let wing = free.freeArrowHead[0], tip = free.freeArrowHead[1]
+        let hit = CGPoint(x:(wing.x+tip.x)/2,y:(wing.y+tip.y)/2)
+        begin()
+        canvas.mouseDown(with:event(.leftMouseDown,hit.x-0.5,hit.y-0.5,1110))
+        canvas.mouseDragged(with:event(.leftMouseDragged,hit.x+0.5,hit.y+0.5,1111))
+        canvas.mouseUp(with:event(.leftMouseUp,hit.x+0.5,hit.y+0.5,1112)); end()
+        try expect(doc.state.hasSelection, "Arrowhead could not be selected")
+        begin(); canvas.keyDown(with:toolKey("\u{7f}",code:51)); end()
+        try expect(!doc.state.note.strokes.contains{$0.id == free.id}, "Selected free arrow delete failed")
+        doc.undoInk(nil); try expect(doc.state.note.strokes.last == free, "Free arrow deletion undo failed")
         doc.state.selectTool(.pen)
-        print("Verified: 100 taps; 2002-sample stroke; mid-stroke save continuity; style; undo/redo; interruption; dot pixels; grid pixels/style undo/redo; stroke eraser click/sweep/undo/redo/keys; rectangle selection/move/undo/redo/save; zoom transforms/ink/eraser/reset; outer viewport grid/input/reopen; shapes/command circle/corner resize/undo/redo; laser hold/release/expiry/non-persistence; managed note automatic save/reopen; disk roundtrip; corrupt read")
+        print("Verified: Q free-arrow drawing/head-selection/delete/undo/redo/save; 100 taps; 2002-sample stroke; mid-stroke save continuity; style; undo/redo; interruption; dot pixels; grid pixels/style undo/redo; stroke eraser click/sweep/undo/redo/keys; rectangle selection/move/undo/redo/save; zoom transforms/ink/eraser/reset; outer viewport grid/input/reopen; shapes/command circle/corner resize/undo/redo; laser hold/release/expiry/non-persistence; managed note automatic save/reopen; disk roundtrip; corrupt read")
         doc.updateChangeCount(.changeCleared)
         doc.close()
     }
@@ -923,7 +949,9 @@ extension AppSelfTest {
         var image=InkStroke(samples:[InkSample(x:100,y:100,time:1),InkSample(x:200,y:150,time:1)])
         image.tool="image"; image.imagePNG=bitmap.representation(using:.png,properties:[:])!
         let shape=InkStroke.shape(.rectangle,from:CGPoint(x:300,y:300),to:CGPoint(x:400,y:350),constrained:false,color:.green,width:2)!
-        edit { doc.appendStrokes([image,shape],actionName:"이미지·도형") }
+        var free=InkStroke(samples:[InkSample(x:500,y:500,time:1),InkSample(x:520,y:460,time:2),InkSample(x:560,y:490,time:3)])
+        free.tool="freeArrow"
+        edit { doc.appendStrokes([image,shape,free],actionName:"이미지·도형·자유 화살표") }
         if CommandLine.arguments.contains("--kill-after-conflict") {
             let external=NoteFile(strokes:[InkStroke(color:.red,samples:[InkSample(x:54321,y:1,time:1)])])
             try external.encoded().write(to:source,options:.atomic)
