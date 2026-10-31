@@ -13,6 +13,12 @@ struct EditorView: View {
                         .help("열기 · ⌘O").accessibilityLabel("열기")
                     Button { state.finishInput?(); state.document?.save(nil) } label: { Image(systemName: "square.and.arrow.down") }
                         .help("저장 · ⌘S").accessibilityLabel("저장")
+                    Button {
+                        NSApp.sendAction(#selector(AppDelegate.checkForUpdates(_:)), to: NSApp.delegate, from: nil)
+                    } label: {
+                        Image(systemName: "arrow.down.circle")
+                            .foregroundStyle(Color.accentColor)
+                    }.help("새 버전 다운로드 및 업데이트").accessibilityLabel("업데이트 다운로드")
                     Divider().frame(height: 22)
                     Button { state.document?.undoInk(nil) } label: { Image(systemName: "arrow.uturn.backward") }
                         .disabled(!state.canUndo).help("실행 취소 · ⌘Z").accessibilityLabel("실행 취소")

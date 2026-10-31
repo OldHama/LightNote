@@ -47,7 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         }
         updaterController.startUpdater()
     }
-    @objc private func checkForUpdates(_ sender: Any?) {
+    @objc func checkForUpdates(_ sender: Any?) {
         if let install = postponedUpdate {
             do {
                 for case let document as NoteDocument in documents.documents { try document.persistNow() }
