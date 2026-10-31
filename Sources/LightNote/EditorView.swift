@@ -41,6 +41,14 @@ struct EditorView: View {
                         Image(systemName: "dot.scope")
                             .foregroundStyle(state.tool == .laser ? Color.red : .secondary)
                     }.help("레이저 · L").accessibilityLabel("레이저")
+                    Button { state.selectTool(.ellipse) } label: {
+                        Image(systemName: "circle")
+                            .foregroundStyle(state.tool == .ellipse ? Color.accentColor : .secondary)
+                    }.help("원 / 타원 · C · ⌘ 정원").accessibilityLabel("원 / 타원")
+                    Button { state.selectTool(.rectangle) } label: {
+                        Image(systemName: "rectangle")
+                            .foregroundStyle(state.tool == .rectangle ? Color.accentColor : .secondary)
+                    }.help("사각형 · R · ⌘ 정사각형").accessibilityLabel("사각형")
                     ForEach(NoteState.colorPresets, id: \.key) { preset in
                         Button { state.color = preset.color } label: {
                             Circle().fill(Color(cgColor: preset.color.cgColor)).frame(width: 19, height: 19)

@@ -100,6 +100,34 @@ final class InkCanvasView: NSView {
     private var laserTimer: Timer?
     var visibleLaserTraceCount: Int { laserTraces.count + (activeLaser == nil ? 0 : 1) }
     private var cache: [UUID: CachedStroke] = [:]
+    private struct ShapeDraft {
+        let kind: InkShapeKind
+        let start: CGPoint
+        var end: CGPoint
+        var constrained: Bool
+        let color: InkColor
+        let width: Double
+        let id = UUID()
+        let time = ProcessInfo.processInfo.systemUptime
+        var stroke: InkStroke? {
+            InkStroke.shape(kind, from: start, to: end, constrained: constrained,
+                            color: color, width: width, id: id, time: time)
+        }
+    }
+    private struct ResizeDrag {
+        let source: CGRect
+        let anchor: CGPoint
+        let corner: CGPoint
+        var target: CGPoint
+        var transform: CGAffineTransform {
+            let sx = abs(target.x-anchor.x)/source.width
+            let sy = abs(target.y-anchor.y)/source.height
+            return CGAffineTransform(a: sx, b: 0, c: 0, d: sy,
+                                     tx: anchor.x*(1-sx), ty: anchor.y*(1-sy))
+        }
+    }
+    private var shapeDraft: ShapeDraft?
+    private var resizeDrag: ResizeDrag?
     private var selectedIDs = Set<UUID>()
     private var marqueeStart: CGPoint?
     private var marqueeRect: CGRect?
@@ -149,7 +177,7 @@ final class InkCanvasView: NSView {
             name: NSApplication.willResignActiveNotification, object: nil)
     }
     private func toolCursor() -> NSCursor {
-        if state.tool == .selection || state.tool == .laser { return .crosshair }
+        if [.selection, .laser, .ellipse, .rectangle].contains(state.tool) { return .crosshair }
         guard state.tool == .eraser else { return .arrow }
         // Use the actual canvas-to-window transform, matching event coordinate conversion.
         let diameter = abs(convert(NSSize(width: NoteState.eraserRadius * 2, height: 0), to: nil).width)
@@ -221,6 +249,13 @@ final class InkCanvasView: NSView {
         finishStroke(reason: "new-down")
         window?.makeFirstResponder(self)
         guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        if state.tool == .ellipse || state.tool == .rectangle {
+            let point = convert(event.locationInWindow, from: nil)
+            shapeDraft = ShapeDraft(kind: state.tool == .ellipse ? .ellipse : .rectangle,
+                start: point, end: point, constrained: event.modifierFlags.contains(.command),
+                color: state.color, width: state.width)
+            return
+        }
         if state.tool == .laser {
             let now = ProcessInfo.processInfo.systemUptime
             // A new hold also freezes any still-visible previous laser traces.
@@ -237,7 +272,14 @@ final class InkCanvasView: NSView {
         }
         if state.tool == .selection {
             let point = convert(event.locationInWindow, from: nil)
-            if let rect = selectionBounds, rect.contains(point) {
+            if let rect = selectionBounds, let corner = handleCorners(rect).first(where: {
+                abs($0.x-point.x) <= handleRadius && abs($0.y-point.y) <= handleRadius &&
+                hypot($0.x-point.x, $0.y-point.y) < hypot(rect.midX-point.x, rect.midY-point.y)
+            }) {
+                let anchor = CGPoint(x: corner.x == rect.minX ? rect.maxX : rect.minX,
+                                     y: corner.y == rect.minY ? rect.maxY : rect.minY)
+                resizeDrag = ResizeDrag(source: rect, anchor: anchor, corner: corner, target: corner)
+            } else if let rect = selectionBounds, rect.contains(point) {
                 moveStart = point
                 moveDelta = .zero
             } else {
@@ -258,19 +300,25 @@ final class InkCanvasView: NSView {
         append(event)
     }
     override func mouseDragged(with event: NSEvent) {
+        if shapeDraft != nil { updateShape(with: event); return }
         if activeLaser != nil { appendLaser(event); return }
-        if marqueeStart != nil || moveStart != nil { updateSelection(with: event); return }
+        if marqueeStart != nil || moveStart != nil || resizeDrag != nil { updateSelection(with: event); return }
         if erasingLast != nil { erase(with: event); return }
         guard active != nil else { return } // Never bridge a disconnected input session.
         append(event)
     }
     override func mouseUp(with event: NSEvent) {
+        if shapeDraft != nil {
+            updateShape(with: event)
+            finishStroke(reason: "shape-up")
+            return
+        }
         if activeLaser != nil {
             appendLaser(event)
             finishLaser()
             return
         }
-        if marqueeStart != nil || moveStart != nil {
+        if marqueeStart != nil || moveStart != nil || resizeDrag != nil {
             updateSelection(with: event)
             finishStroke(reason: "selection-up")
             return
@@ -286,14 +334,46 @@ final class InkCanvasView: NSView {
     }
     override func tabletPoint(with event: NSEvent) {
         // AppKit may deliver independent tablet-point events between mouse events.
+        if shapeDraft != nil { updateShape(with: event); return }
         if activeLaser != nil { appendLaser(event); return }
-        if marqueeStart != nil || moveStart != nil { updateSelection(with: event); return }
+        if marqueeStart != nil || moveStart != nil || resizeDrag != nil { updateSelection(with: event); return }
         if erasingLast != nil { erase(with: event); return }
         guard active != nil else { return }
         append(event)
     }
     override func tabletProximity(with event: NSEvent) {
         if !event.isEnteringProximity { finishStroke(reason: "proximity-exit") }
+    }
+
+    private var handleRadius: CGFloat { 7 / (enclosingScrollView?.magnification ?? 1) }
+    private func handleCorners(_ rect: CGRect) -> [CGPoint] {
+        [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
+         CGPoint(x: rect.maxX, y: rect.maxY), CGPoint(x: rect.minX, y: rect.maxY)]
+    }
+    private var selectionTransform: CGAffineTransform {
+        resizeDrag?.transform ?? CGAffineTransform(translationX: moveDelta.width, y: moveDelta.height)
+    }
+    private func updateShape(with event: NSEvent) {
+        guard shapeDraft != nil else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        guard point.x.isFinite, point.y.isFinite else { return }
+        let old = shapeDraft?.stroke?.bounds ?? .null
+        shapeDraft?.end = point
+        shapeDraft?.constrained = event.modifierFlags.contains(.command)
+        let rect = shapeDraft?.stroke?.bounds ?? .null
+        if !rect.isNull {
+            expandWorkspace(to: NSSize(width: rect.maxX+24, height: rect.maxY+24))
+            setNeedsDisplay(old.union(rect))
+        } else if !old.isNull { setNeedsDisplay(old) }
+    }
+    override func flagsChanged(with event: NSEvent) {
+        if shapeDraft != nil {
+            let old = shapeDraft?.stroke?.bounds ?? .null
+            shapeDraft?.constrained = event.modifierFlags.contains(.command)
+            let rect = shapeDraft?.stroke?.bounds ?? .null
+            if !old.union(rect).isNull { setNeedsDisplay(old.union(rect)) }
+        }
+        super.flagsChanged(with: event)
     }
 
     private var laserPadding: CGFloat { 12 / (enclosingScrollView?.magnification ?? 1) }
@@ -377,18 +457,28 @@ final class InkCanvasView: NSView {
     }
     private func clearSelection() {
         if let rect = selectionBounds {
-            setNeedsDisplay(rect.union(rect.offsetBy(dx: moveDelta.width, dy: moveDelta.height))
-                .insetBy(dx: -3, dy: -3))
+            setNeedsDisplay(rect.union(rect.applying(selectionTransform))
+                .insetBy(dx: -handleRadius*2, dy: -handleRadius*2))
         }
         if let rect = marqueeRect { setNeedsDisplay(rect.insetBy(dx: -3, dy: -3)) }
         selectedIDs.removeAll()
-        marqueeStart = nil; marqueeRect = nil; moveStart = nil; moveDelta = .zero
+        marqueeStart = nil; marqueeRect = nil; moveStart = nil; moveDelta = .zero; resizeDrag = nil
     }
     private func updateSelection(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         guard point.x.isFinite, point.y.isFinite else { return }
-        let padding = 4 / (enclosingScrollView?.magnification ?? 1)
-        if let start = marqueeStart {
+        let padding = handleRadius * 2
+        if var resize = resizeDrag {
+            let old = resize.source.applying(resize.transform)
+            let minimum = 12 / (enclosingScrollView?.magnification ?? 1)
+            resize.target = CGPoint(
+                x: resize.corner.x < resize.anchor.x ? min(point.x, resize.anchor.x-minimum) : max(point.x, resize.anchor.x+minimum),
+                y: resize.corner.y < resize.anchor.y ? min(point.y, resize.anchor.y-minimum) : max(point.y, resize.anchor.y+minimum))
+            resizeDrag = resize
+            let updated = resize.source.applying(resize.transform)
+            expandWorkspace(to: NSSize(width: updated.maxX+24, height: updated.maxY+24))
+            setNeedsDisplay(old.union(updated).insetBy(dx: -padding, dy: -padding))
+        } else if let start = marqueeStart {
             let old = marqueeRect ?? .null
             let rect = CGRect(x: min(start.x, point.x), y: min(start.y, point.y),
                               width: abs(point.x-start.x), height: abs(point.y-start.y))
@@ -407,10 +497,16 @@ final class InkCanvasView: NSView {
         }
     }
     private func finishSelection() {
+        if let resize = resizeDrag {
+            resizeDrag = nil
+            if resize.target != resize.corner {
+                state.document?.transformStrokes(ids: selectedIDs, using: resize.transform)
+            }
+        }
         if let rect = marqueeRect, marqueeStart != nil {
             selectedIDs = Set(state.note.strokes.filter { stroke in
                 guard stroke.bounds.intersects(rect) else { return false }
-                let points = cache[stroke.id]?.points ?? InkPathBuilder.make(samples: stroke.samples).points
+                let points = cache[stroke.id]?.points ?? InkPathBuilder.make(stroke: stroke).points
                 if points.contains(where: { rect.contains($0) }) { return true }
                 let corners = [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
                                CGPoint(x: rect.maxX, y: rect.maxY), CGPoint(x: rect.minX, y: rect.maxY)]
@@ -478,6 +574,10 @@ final class InkCanvasView: NSView {
     func finishStroke(reason: String) {
         // Only an actual mouse release (or replacement down event) starts laser fading.
         if reason == "new-down" { finishLaser() }
+        if let draft = shapeDraft {
+            shapeDraft = nil
+            if let stroke = draft.stroke { state.document?.append(stroke) }
+        }
         finishSelection()
         if erasingLast != nil {
             erasingLast = nil
@@ -518,6 +618,14 @@ final class InkCanvasView: NSView {
                 state.adjustPenWidth(increase: true)
                 return
             }
+            if event.keyCode == 8 || event.charactersIgnoringModifiers?.lowercased() == "c" {
+                state.selectTool(.ellipse)
+                return
+            }
+            if event.keyCode == 15 || event.charactersIgnoringModifiers?.lowercased() == "r" {
+                state.selectTool(.rectangle)
+                return
+            }
             if event.keyCode == 37 || event.charactersIgnoringModifiers?.lowercased() == "l" {
                 state.selectTool(.laser)
                 return
@@ -526,7 +634,12 @@ final class InkCanvasView: NSView {
                 state.selectTool(.selection)
                 return
             }
-            if event.keyCode == 53 { clearSelection(); return }
+            if event.keyCode == 53 {
+                if let rect = shapeDraft?.stroke?.bounds { setNeedsDisplay(rect) }
+                shapeDraft = nil
+                clearSelection()
+                return
+            }
             if event.keyCode == 14 || event.charactersIgnoringModifiers?.lowercased() == "e" {
                 state.selectTool(.eraser)
                 return
@@ -558,22 +671,23 @@ final class InkCanvasView: NSView {
             let cached: CachedStroke
             if let existing = cache[stroke.id] { cached = existing }
             else {
-                let geometry = InkPathBuilder.make(samples: stroke.samples)
+                let geometry = InkPathBuilder.make(stroke: stroke)
                 cached = CachedStroke(path: geometry.path.copy()!, bounds: stroke.bounds, points: geometry.points)
                 cache[stroke.id] = cached
             }
-            let selected = selectedIDs.contains(stroke.id)
-            let delta = selected ? moveDelta : .zero
-            if cached.bounds.offsetBy(dx: delta.width, dy: delta.height).intersects(dirtyRect) {
-                context.saveGState()
-                context.translateBy(x: delta.width, y: delta.height)
-                render(stroke, path: cached.path, in: context)
-                context.restoreGState()
+            var transform = selectedIDs.contains(stroke.id) ? selectionTransform : .identity
+            if cached.bounds.applying(transform).intersects(dirtyRect) {
+                let path = transform.isIdentity ? cached.path : (cached.path.copy(using: &transform) ?? cached.path)
+                render(stroke, path: path, in: context)
             }
+        }
+        if let shape = shapeDraft?.stroke {
+            let geometry = InkPathBuilder.make(stroke: shape)
+            render(shape, path: geometry.path, in: context)
         }
         if let active { render(active, path: liveInk.path, tail: liveInk.lastPoint, in: context) }
         if state.tool == .selection,
-           let rect = marqueeRect ?? selectionBounds?.offsetBy(dx: moveDelta.width, dy: moveDelta.height) {
+           let rect = marqueeRect ?? selectionBounds?.applying(selectionTransform) {
             let scale = enclosingScrollView?.magnification ?? 1
             context.saveGState()
             context.setFillColor(NSColor.controlAccentColor.withAlphaComponent(0.07).cgColor)
@@ -582,6 +696,15 @@ final class InkCanvasView: NSView {
             context.setLineWidth(1 / scale)
             context.setLineDash(phase: 0, lengths: [5 / scale, 3 / scale])
             context.stroke(rect)
+            if marqueeRect == nil {
+                context.setLineDash(phase: 0, lengths: [])
+                context.setFillColor(NSColor.white.cgColor)
+                for corner in handleCorners(rect) {
+                    let box = CGRect(x: corner.x-4/scale, y: corner.y-4/scale, width: 8/scale, height: 8/scale)
+                    context.fill(box)
+                    context.stroke(box)
+                }
+            }
             context.restoreGState()
         }
         let now = ProcessInfo.processInfo.systemUptime

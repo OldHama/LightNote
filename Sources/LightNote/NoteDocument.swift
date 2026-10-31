@@ -3,18 +3,19 @@ import SwiftUI
 import OSLog
 
 enum InkTool {
-    case pen, eraser, selection, laser
+    case pen, eraser, selection, laser, ellipse, rectangle
     var title: String {
-        switch self { case .pen: "볼펜"; case .eraser: "획 지우개"; case .selection: "사각형 선택"; case .laser: "레이저" }
+        switch self { case .pen: "볼펜"; case .eraser: "획 지우개"; case .selection: "사각형 선택"; case .laser: "레이저"; case .ellipse: "원 / 타원"; case .rectangle: "사각형" }
     }
     var symbol: String {
-        switch self { case .pen: "pencil.tip"; case .eraser: "eraser"; case .selection: "selection.pin.in.out"; case .laser: "dot.scope" }
+        switch self { case .pen: "pencil.tip"; case .eraser: "eraser"; case .selection: "selection.pin.in.out"; case .laser: "dot.scope"; case .ellipse: "circle"; case .rectangle: "rectangle" }
     }
     var hint: String {
         switch self {
         case .pen: "일정한 굵기"
         case .eraser: "닿은 획 전체 삭제"
         case .selection: "영역 선택 후 안쪽을 드래그하여 이동"
+        case .ellipse, .rectangle: "드래그하여 그리기 · ⌘ 정원 / 정사각형"
         case .laser: "누르는 동안 유지 · 떼면 1초 후 2초간 서서히 사라짐"
         }
     }
@@ -187,7 +188,19 @@ final class NoteDocument: NSDocument {
         guard moved.allSatisfy({ $0.samples.allSatisfy { abs($0.x) <= 100000 && abs($0.y) <= 100000 } }) else { return }
         replaceStrokes(moved)
     }
-    private func replaceStrokes(_ replacements: [InkStroke]) {
+    func transformStrokes(ids: Set<UUID>, using transform: CGAffineTransform) {
+        let changed = state.note.strokes.filter { ids.contains($0.id) }.map { stroke in
+            var copy = stroke
+            for i in copy.samples.indices {
+                let point = copy.samples[i].point.applying(transform)
+                copy.samples[i].x = point.x; copy.samples[i].y = point.y
+            }
+            return copy
+        }
+        guard changed.allSatisfy({ $0.samples.allSatisfy { $0.x.isFinite && $0.y.isFinite && abs($0.x) <= 100000 && abs($0.y) <= 100000 } }) else { return }
+        replaceStrokes(changed, actionName: "선택 크기 변경")
+    }
+    private func replaceStrokes(_ replacements: [InkStroke], actionName: String = "선택 이동") {
         let lookup = Dictionary(uniqueKeysWithValues: replacements.map { ($0.id, $0) })
         var previous: [InkStroke] = []
         var dirty = CGRect.null
@@ -199,8 +212,8 @@ final class NoteDocument: NSDocument {
             state.note.strokes[index] = replacement
         }
         guard !previous.isEmpty else { return }
-        undoManager?.registerUndo(withTarget: self) { target in target.replaceStrokes(previous) }
-        undoManager?.setActionName("선택 이동")
+        undoManager?.registerUndo(withTarget: self) { target in target.replaceStrokes(previous, actionName: actionName) }
+        undoManager?.setActionName(actionName)
         state.invalidateStrokeCache?(Set(previous.map(\.id)))
         state.invalidate?(dirty)
         state.refresh()

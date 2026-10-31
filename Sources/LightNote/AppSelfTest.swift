@@ -16,9 +16,9 @@ enum AppSelfTest {
         window.makeKeyAndOrderFront(nil)
         let canvas = InkCanvasView(state: doc.state)
         window.contentView = canvas
-        func event(_ type: NSEvent.EventType, _ x: Double, _ y: Double, _ time: Double) -> NSEvent {
+        func event(_ type: NSEvent.EventType, _ x: Double, _ y: Double, _ time: Double, modifiers: NSEvent.ModifierFlags = []) -> NSEvent {
             let location = canvas.convert(CGPoint(x: x, y: y), to: nil)
-            return NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: time,
+            return NSEvent.mouseEvent(with: type, location: location, modifierFlags: modifiers, timestamp: time,
                 windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0)!
         }
         doc.undoManager?.groupsByEvent = false
@@ -314,7 +314,63 @@ enum AppSelfTest {
         try expect(doc.state.note == beforeLaser && doc.undoManager?.canUndo == undoBeforeLaser,
                    "Laser changed ink or undo history")
         doc.state.selectTool(.pen)
-        print("Verified: 100 taps; 2002-sample stroke; mid-stroke save continuity; style; undo/redo; interruption; dot pixels; grid pixels/style undo/redo; stroke eraser click/sweep/undo/redo/keys; rectangle selection/move/undo/redo/save; zoom transforms/ink/eraser/reset; outer viewport grid/input/reopen; laser hold/release/expiry/non-persistence; managed note automatic save/reopen; disk roundtrip; corrupt read")
+        func toolKey(_ value: String, code: UInt16) -> NSEvent {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 800,
+                windowNumber: window.windowNumber, context: nil, characters: value,
+                charactersIgnoringModifiers: value, isARepeat: false, keyCode: code)!
+        }
+        canvas.keyDown(with: toolKey("r", code: 15))
+        try expect(doc.state.tool == .rectangle, "R did not select rectangle")
+        begin()
+        canvas.mouseDown(with: event(.leftMouseDown, 2500, 2000, 801))
+        canvas.mouseDragged(with: event(.leftMouseDragged, 2600, 2050, 802))
+        canvas.mouseUp(with: event(.leftMouseUp, 2600, 2050, 803))
+        end()
+        let rectangle = doc.state.note.strokes.last!
+        try expect(rectangle.tool == "rectangle" && rectangle.pointBounds.width == 100 && rectangle.pointBounds.height == 50,
+                   "Rectangle dimensions incorrect")
+        canvas.keyDown(with: toolKey("c", code: 8))
+        try expect(doc.state.tool == .ellipse, "C did not select ellipse")
+        begin()
+        canvas.mouseDown(with: event(.leftMouseDown, 2800, 2000, 804, modifiers: .command))
+        canvas.mouseUp(with: event(.leftMouseUp, 2900, 2050, 805, modifiers: .command))
+        end()
+        let circle = doc.state.note.strokes.last!
+        try expect(circle.tool == "ellipse" && abs(circle.pointBounds.width-circle.pointBounds.height) < 1e-9,
+                   "Command did not constrain circle")
+        canvas.keyDown(with: toolKey("v", code: 9))
+        canvas.mouseDown(with: event(.leftMouseDown, 2490, 1990, 806))
+        canvas.mouseUp(with: event(.leftMouseUp, 2610, 2060, 807))
+        let beforeResize = doc.state.note.strokes
+        let margin = 5 / scroll.magnification
+        let frame = rectangle.bounds.insetBy(dx: -margin, dy: -margin)
+        begin()
+        canvas.mouseDown(with: event(.leftMouseDown, frame.maxX, frame.maxY, 808))
+        canvas.mouseDragged(with: event(.leftMouseDragged, frame.maxX+frame.width, frame.maxY+frame.height, 809))
+        try expect(doc.state.note.strokes == beforeResize, "Resize preview mutated ink")
+        canvas.mouseUp(with: event(.leftMouseUp, frame.maxX+frame.width, frame.maxY+frame.height, 810))
+        end()
+        let enlarged = doc.state.note.strokes.first { $0.id == rectangle.id }!
+        try expect(abs(enlarged.pointBounds.width-200) < 1e-9 && abs(enlarged.pointBounds.height-100) < 1e-9,
+                   "Corner handle did not enlarge shape")
+        try expect(doc.state.note.strokes.last == circle, "Resize changed unselected circle")
+        doc.undoInk(nil)
+        try expect(doc.state.note.strokes == beforeResize, "Resize undo not exact")
+        doc.redoInk(nil)
+        try expect(doc.state.note.strokes.first { $0.id == rectangle.id } == enlarged, "Resize redo failed")
+        doc.undoInk(nil)
+        begin()
+        canvas.mouseDown(with: event(.leftMouseDown, frame.minX, frame.minY, 811))
+        canvas.mouseUp(with: event(.leftMouseUp, frame.midX, frame.midY, 812))
+        end()
+        let smaller = doc.state.note.strokes.first { $0.id == rectangle.id }!
+        try expect(abs(smaller.pointBounds.width-50) < 1e-9 && abs(smaller.pointBounds.height-25) < 1e-9,
+                   "Opposite corner handle did not shrink shape")
+        doc.undoInk(nil)
+        let shapeFile = try NoteFile.decode(doc.data(ofType: "com.lightnote.note"))
+        try expect(shapeFile.strokes == doc.state.note.strokes, "Shape roundtrip failed")
+        doc.state.selectTool(.pen)
+        print("Verified: 100 taps; 2002-sample stroke; mid-stroke save continuity; style; undo/redo; interruption; dot pixels; grid pixels/style undo/redo; stroke eraser click/sweep/undo/redo/keys; rectangle selection/move/undo/redo/save; zoom transforms/ink/eraser/reset; outer viewport grid/input/reopen; shapes/command circle/corner resize/undo/redo; laser hold/release/expiry/non-persistence; managed note automatic save/reopen; disk roundtrip; corrupt read")
         doc.updateChangeCount(.changeCleared)
         doc.close()
     }

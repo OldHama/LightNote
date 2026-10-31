@@ -88,6 +88,31 @@ final class InkTests: XCTestCase {
         XCTAssertEqual(LaserTiming.opacity(releasedAt: 10, now: 20), 0)
     }
 
+    func testCommandConstrainedShapesAndFileRoundtrip() throws {
+        for kind in [InkShapeKind.ellipse, .rectangle] {
+            let regular = InkStroke.shape(kind, from: CGPoint(x: 100, y: 100), to: CGPoint(x: 40, y: 70),
+                                          constrained: false, color: .blue, width: 2)!
+            XCTAssertEqual(regular.pointBounds.width, 60, accuracy: 1e-9)
+            XCTAssertEqual(regular.pointBounds.height, 30, accuracy: 1e-9)
+            let equal = InkStroke.shape(kind, from: CGPoint(x: 100, y: 100), to: CGPoint(x: 40, y: 70),
+                                        constrained: true, color: .blue, width: 2)!
+            XCTAssertEqual(equal.pointBounds.width, equal.pointBounds.height, accuracy: 1e-9)
+            XCTAssertEqual(equal.pointBounds.minX, 40, accuracy: 1e-9)
+            XCTAssertEqual(equal.pointBounds.minY, 40, accuracy: 1e-9)
+            XCTAssertEqual(try NoteFile.decode(NoteFile(strokes: [equal]).encoded()).strokes, [equal])
+            XCTAssertEqual(equal.samples.first?.point, equal.samples.last?.point)
+        }
+    }
+    func testRectangleHasSharpGeometryAndEllipseHitTesting() {
+        let rectangle = InkStroke.shape(.rectangle, from: .zero, to: CGPoint(x: 100, y: 60),
+                                         constrained: false, color: .black, width: 1)!
+        XCTAssertEqual(InkPathBuilder.make(stroke: rectangle).points.count, 5)
+        let ellipse = InkStroke.shape(.ellipse, from: .zero, to: CGPoint(x: 100, y: 60),
+                                       constrained: false, color: .black, width: 1)!
+        XCTAssertTrue(ellipse.intersectsEraser(from: CGPoint(x: 100, y: 30), to: CGPoint(x: 100, y: 30), radius: 1))
+        XCTAssertFalse(ellipse.intersectsEraser(from: CGPoint(x: 50, y: 30), to: CGPoint(x: 50, y: 30), radius: 1))
+    }
+
     func testDotBoundsAreNotEmpty() {
         let dot = InkStroke(width: 0.5, samples: [InkSample(x: 50, y: 60, time: 0)])
         XCTAssertFalse(dot.bounds.isEmpty)

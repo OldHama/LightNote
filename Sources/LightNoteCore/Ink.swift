@@ -46,7 +46,7 @@ public struct InkStroke: Codable, Equatable, Sendable, Identifiable {
                           width: abs(end.x - start.x), height: abs(end.y - start.y))
             .insetBy(dx: -reach, dy: -reach)
         guard bounds.intersects(area) else { return false }
-        let points = polyline ?? InkPathBuilder.make(samples: samples).points
+        let points = polyline ?? InkPathBuilder.make(stroke: self).points
         guard let first = points.first else { return false }
         func distance(_ p: CGPoint, _ a: CGPoint, _ b: CGPoint) -> CGFloat {
             let dx = b.x - a.x, dy = b.y - a.y
@@ -126,7 +126,7 @@ public struct NoteFile: Codable, Equatable, Sendable {
         }
         var ids = Set<UUID>()
         for stroke in strokes {
-            guard ids.insert(stroke.id).inserted, stroke.tool == "pen",
+            guard ids.insert(stroke.id).inserted, ["pen", "ellipse", "rectangle"].contains(stroke.tool),
                   stroke.width.isFinite, (0.1...100).contains(stroke.width),
                   !stroke.samples.isEmpty else { throw NoteError.invalidData }
             for c in [stroke.color.red, stroke.color.green, stroke.color.blue, stroke.color.alpha] {
@@ -213,6 +213,15 @@ public final class InkPathBuilder {
             pendingStart = nil
         }
     }
+    public static func make(stroke: InkStroke) -> InkPathBuilder {
+        guard stroke.tool != "pen" else { return make(samples: stroke.samples) }
+        let builder = InkPathBuilder()
+        builder.points = stroke.samples.map(\.point)
+        let rect = stroke.pointBounds
+        if stroke.tool == "ellipse" { builder.path.addEllipse(in: rect) }
+        else { builder.path.addRect(rect) }
+        return builder
+    }
     public static func make(samples: [InkSample]) -> InkPathBuilder {
         let builder = InkPathBuilder()
         for sample in samples { builder.append(sample.point) }
@@ -226,5 +235,47 @@ public enum LaserTiming {
     public static func opacity(releasedAt: TimeInterval?, now: TimeInterval) -> Double {
         guard let releasedAt else { return 1 }
         return max(0, min(1, 1 - (now - releasedAt - 1) / 2))
+    }
+}
+
+public enum InkShapeKind: String, Sendable { case ellipse, rectangle }
+
+extension InkStroke {
+    public var pointBounds: CGRect {
+        guard let first = samples.first else { return .null }
+        var minX = first.x, maxX = first.x, minY = first.y, maxY = first.y
+        for p in samples.dropFirst() {
+            minX = min(minX, p.x); maxX = max(maxX, p.x)
+            minY = min(minY, p.y); maxY = max(maxY, p.y)
+        }
+        return CGRect(x: minX, y: minY, width: maxX-minX, height: maxY-minY)
+    }
+    public static func shape(_ kind: InkShapeKind, from start: CGPoint, to end: CGPoint,
+                             constrained: Bool, color: InkColor, width: Double,
+                             id: UUID = UUID(), time: Double = 0) -> InkStroke? {
+        var dx = end.x-start.x, dy = end.y-start.y
+        if constrained {
+            let size = max(abs(dx), abs(dy))
+            dx = (dx < 0 ? -1 : 1) * size; dy = (dy < 0 ? -1 : 1) * size
+        }
+        let rect = CGRect(x: min(start.x, start.x+dx), y: min(start.y, start.y+dy), width: abs(dx), height: abs(dy))
+        guard rect.width >= 0.1, rect.height >= 0.1 else { return nil }
+        var points: [CGPoint]
+        if kind == .rectangle {
+            points = [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
+                      CGPoint(x: rect.maxX, y: rect.maxY), CGPoint(x: rect.minX, y: rect.maxY),
+                      CGPoint(x: rect.minX, y: rect.minY)]
+        } else {
+            let steps = max(64, min(2048, Int(ceil(.pi * (rect.width+rect.height) / 0.75 / 4)) * 4))
+            points = (0..<steps).map { i in
+                let angle = CGFloat(i) * 2 * .pi / CGFloat(steps)
+                return CGPoint(x: rect.midX + rect.width/2*cos(angle), y: rect.midY + rect.height/2*sin(angle))
+            }
+            points.append(points[0])
+        }
+        var stroke = InkStroke(id: id, color: color, width: width,
+            samples: points.map { InkSample(x: $0.x, y: $0.y, time: time) })
+        stroke.tool = kind.rawValue
+        return stroke
     }
 }
