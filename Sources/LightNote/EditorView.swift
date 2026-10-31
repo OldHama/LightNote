@@ -140,7 +140,7 @@ private struct ShortcutHelpView: View {
                     row("P", "펜")
                     row("E", "획 지우개")
                     row("V", "사각형 선택 · 내부 드래그로 이동")
-                    row("L", "레이저 · 떼면 1초 유지 후 2초간 사라짐")
+                    row("L", "레이저 · 다시 누르면 복원, 떼면 2초간 사라짐")
                     row("C", "원 · 타원")
                     row("R", "사각형")
                     row("A", "화살표")

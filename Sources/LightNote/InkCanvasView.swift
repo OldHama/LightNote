@@ -98,6 +98,9 @@ final class InkCanvasView: NSView {
     private var activeLaserBounds = CGRect.null
     private var laserTraces: [LaserTrace] = []
     private var laserTimer: Timer?
+    var laserIsFullyVisible: Bool {
+        activeLaser != nil && laserTraces.allSatisfy { $0.opacity == 1 && $0.releasedAt == nil }
+    }
     var visibleLaserTraceCount: Int { laserTraces.count + (activeLaser == nil ? 0 : 1) }
     private var cache: [UUID: CachedStroke] = [:]
     private struct ShapeDraft {
@@ -259,12 +262,13 @@ final class InkCanvasView: NSView {
         }
         if state.tool == .laser {
             let now = ProcessInfo.processInfo.systemUptime
-            // A new hold also freezes any still-visible previous laser traces.
+            // Restore only still-visible traces to full brightness on a new hold.
+            laserTraces.removeAll { $0.opacity * LaserTiming.opacity(releasedAt: $0.releasedAt, now: now) <= 0 }
             for index in laserTraces.indices {
-                laserTraces[index].opacity *= LaserTiming.opacity(releasedAt: laserTraces[index].releasedAt, now: now)
+                laserTraces[index].opacity = 1
                 laserTraces[index].releasedAt = nil
+                setNeedsDisplay(laserTraces[index].bounds.insetBy(dx: -laserPadding, dy: -laserPadding))
             }
-            laserTraces.removeAll { $0.opacity <= 0 }
             activeLaser = InkPathBuilder()
             activeLaserBounds = .null
             appendLaser(event)

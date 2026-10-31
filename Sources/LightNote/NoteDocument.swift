@@ -17,7 +17,7 @@ enum InkTool {
         case .selection: "영역 선택 후 안쪽을 드래그하여 이동"
         case .arrow: "드래그한 방향으로 화살표 그리기"
         case .ellipse, .rectangle: "드래그하여 그리기 · ⌘ 정원 / 정사각형"
-        case .laser: "누르는 동안 유지 · 떼면 1초 후 2초간 서서히 사라짐"
+        case .laser: "다시 누르면 진하게 복원 · 떼면 2초간 서서히 사라짐"
         }
     }
 }

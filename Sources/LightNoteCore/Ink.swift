@@ -235,7 +235,7 @@ public final class InkPathBuilder {
 public enum LaserTiming {
     public static func opacity(releasedAt: TimeInterval?, now: TimeInterval) -> Double {
         guard let releasedAt else { return 1 }
-        return max(0, min(1, 1 - (now - releasedAt - 1) / 2))
+        return max(0, min(1, 1 - (now - releasedAt) / 2))
     }
 }
 

@@ -82,8 +82,8 @@ final class InkTests: XCTestCase {
     func testLaserHoldAndReleaseFadeTiming() {
         XCTAssertEqual(LaserTiming.opacity(releasedAt: nil, now: 100000), 1)
         XCTAssertEqual(LaserTiming.opacity(releasedAt: 10, now: 10), 1)
-        XCTAssertEqual(LaserTiming.opacity(releasedAt: 10, now: 11), 1)
-        XCTAssertEqual(LaserTiming.opacity(releasedAt: 10, now: 12), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(LaserTiming.opacity(releasedAt: 10, now: 11), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(LaserTiming.opacity(releasedAt: 10, now: 12), 0)
         XCTAssertEqual(LaserTiming.opacity(releasedAt: 10, now: 13), 0)
         XCTAssertEqual(LaserTiming.opacity(releasedAt: 10, now: 20), 0)
     }
