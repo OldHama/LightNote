@@ -118,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         }
         if menuItem.action == #selector(pasteDocumentSelection(_:)) {
             if let editor = NSApp.keyWindow?.firstResponder as? NSTextView { return editor.isEditable }
-            return activeNote != nil && NSPasteboard.general.availableType(from: [InkCanvasView.inkPasteboardType]) != nil
+            return activeNote != nil && (NSPasteboard.general.availableType(from: [InkCanvasView.inkPasteboardType]) != nil || NSImage.canInit(with: .general))
         }
         if menuItem.action == #selector(duplicateDocumentSelection(_:)) {
             return !(NSApp.keyWindow?.firstResponder is NSTextView) && (activeNote?.state.hasSelection ?? false)

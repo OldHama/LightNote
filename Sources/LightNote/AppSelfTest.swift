@@ -481,6 +481,27 @@ enum AppSelfTest {
         board.clearContents(); board.setData(Data("broken".utf8), forType: InkCanvasView.inkPasteboardType)
         let beforeBadPaste = destinationDoc.state.note
         try expect(!destinationCanvas.pasteSelection(from: board) && destinationDoc.state.note == beforeBadPaste, "Invalid clipboard changed note")
+        let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 40, pixelsHigh: 20,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        for x in 0..<40 { for y in 0..<20 { bitmap.setColor(y < 10 ? .red : .blue, atX: x, y: y) } }
+        let png = bitmap.representation(using: .png, properties: [:])!
+        board.clearContents(); board.setData(png, forType: .png)
+        destinationDoc.undoManager?.beginUndoGrouping()
+        try expect(destinationCanvas.pasteSelection(from: board), "PNG clipboard paste failed")
+        destinationDoc.undoManager?.endUndoGrouping()
+        let imageObject = destinationDoc.state.note.strokes.last!
+        try expect(imageObject.tool == "image" && imageObject.imagePNG != nil && destinationDoc.state.hasSelection, "Image not selected or embedded")
+        let imageSaved = try NoteFile.decode(destinationDoc.data(ofType: "com.lightnote.note"))
+        try expect(imageSaved.strokes.last == imageObject, "Image persistence failed")
+        destinationDoc.undoInk(nil)
+        try expect(destinationDoc.state.note == beforeBadPaste, "Image paste undo failed")
+        destinationDoc.redoInk(nil)
+        try expect(destinationDoc.state.note.strokes.last == imageObject, "Image redo failed")
+        destinationDoc.undoManager?.beginUndoGrouping()
+        destinationDoc.transformStrokes(ids: [imageObject.id], using: CGAffineTransform(scaleX: 2, y: 2))
+        destinationDoc.undoManager?.endUndoGrouping()
+        try expect(destinationDoc.state.note.strokes.last!.imagePNG == imageObject.imagePNG && destinationDoc.state.note.strokes.last!.bounds.width > imageObject.bounds.width, "Image resize damaged payload")
         destinationDoc.updateChangeCount(.changeCleared); destinationDoc.close()
         doc.state.selectTool(.pen)
         print("Verified: 100 taps; 2002-sample stroke; mid-stroke save continuity; style; undo/redo; interruption; dot pixels; grid pixels/style undo/redo; stroke eraser click/sweep/undo/redo/keys; rectangle selection/move/undo/redo/save; zoom transforms/ink/eraser/reset; outer viewport grid/input/reopen; shapes/command circle/corner resize/undo/redo; laser hold/release/expiry/non-persistence; managed note automatic save/reopen; disk roundtrip; corrupt read")

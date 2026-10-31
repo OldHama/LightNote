@@ -34,6 +34,7 @@ public struct InkStroke: Codable, Equatable, Sendable, Identifiable {
     public var color: InkColor
     public var width: Double
     public var tool: String
+    public var imagePNG: Data? = nil
     public var samples: [InkSample]
     public init(id: UUID = UUID(), color: InkColor = .black, width: Double = 1,
                 samples: [InkSample]) {
@@ -41,6 +42,7 @@ public struct InkStroke: Codable, Equatable, Sendable, Identifiable {
     }
     /// Swept eraser hit test: segment crossings count even when events are far apart.
     public func intersectsEraser(from start: CGPoint, to end: CGPoint, radius: CGFloat, polyline: [CGPoint]? = nil) -> Bool {
+        guard tool != "image" else { return false }
         let reach = radius + width / 2 + 0.000001
         let area = CGRect(x: min(start.x, end.x), y: min(start.y, end.y),
                           width: abs(end.x - start.x), height: abs(end.y - start.y))
@@ -126,9 +128,16 @@ public struct NoteFile: Codable, Equatable, Sendable {
         }
         var ids = Set<UUID>()
         for stroke in strokes {
-            guard ids.insert(stroke.id).inserted, ["pen", "ellipse", "rectangle", "arrow"].contains(stroke.tool),
+            guard ids.insert(stroke.id).inserted, ["pen", "ellipse", "rectangle", "arrow", "image"].contains(stroke.tool),
                   stroke.width.isFinite, (0.1...100).contains(stroke.width),
                   !stroke.samples.isEmpty else { throw NoteError.invalidData }
+            if stroke.tool == "image" {
+                guard let data = stroke.imagePNG, data.count <= 50_000_000,
+                      data.starts(with: [137, 80, 78, 71, 13, 10, 26, 10]),
+                      stroke.samples.count == 2,
+                      abs(stroke.samples[1].x - stroke.samples[0].x) > 0,
+                      abs(stroke.samples[1].y - stroke.samples[0].y) > 0 else { throw NoteError.invalidData }
+            }
             for c in [stroke.color.red, stroke.color.green, stroke.color.blue, stroke.color.alpha] {
                 guard c.isFinite, (0...1).contains(c) else { throw NoteError.invalidData }
             }

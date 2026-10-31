@@ -132,6 +132,7 @@ final class InkCanvasView: NSView {
     private var shapeDraft: ShapeDraft?
     private var resizeDrag: ResizeDrag?
     static let inkPasteboardType = NSPasteboard.PasteboardType("com.lightnote.ink-selection")
+    private var imageCache: [UUID: NSImage] = [:]
     private var lastPasteChangeCount: Int?
     private var pasteRepeatCount = 0
     private var selectedIDs = Set<UUID>()
@@ -174,6 +175,7 @@ final class InkCanvasView: NSView {
             guard let self else { return }
             let ids = Set(self.state.note.strokes.map(\.id))
             self.cache = self.cache.filter { ids.contains($0.key) }
+            self.imageCache = self.imageCache.filter { ids.contains($0.key) }
             self.selectedIDs.formIntersection(ids)
             self.state.hasSelection = !self.selectedIDs.isEmpty
             if !self.selectedIDs.isEmpty { self.needsDisplay = true }
@@ -371,6 +373,20 @@ final class InkCanvasView: NSView {
     @discardableResult
     func pasteSelection(from pasteboard: NSPasteboard? = nil) -> Bool {
         let board = pasteboard ?? .general
+        if board.data(forType: Self.inkPasteboardType) == nil {
+            guard let image = NSImage(pasteboard: board),
+                  let tiff = image.tiffRepresentation,
+                  let bitmap = NSBitmapImageRep(data: tiff),
+                  let png = bitmap.representation(using: .png, properties: [:]),
+                  png.count <= 50_000_000, image.size.width > 0, image.size.height > 0 else { return false }
+            let viewport = visibleRect.isEmpty ? bounds : visibleRect
+            let scale = min(1, viewport.width * 0.7 / image.size.width, viewport.height * 0.7 / image.size.height)
+            let size = CGSize(width: max(1, image.size.width * scale), height: max(1, image.size.height * scale))
+            var object = InkStroke(samples: [InkSample(x: viewport.midX-size.width/2, y: viewport.midY-size.height/2, time: 0),
+                                              InkSample(x: viewport.midX+size.width/2, y: viewport.midY+size.height/2, time: 0)])
+            object.tool = "image"; object.imagePNG = png
+            return insertCopies([object], offsetIndex: 0, actionName: "이미지 붙여넣기")
+        }
         guard let data = board.data(forType: Self.inkPasteboardType),
               let file = try? NoteFile.decode(data), !file.strokes.isEmpty else { return false }
         if lastPasteChangeCount == board.changeCount { pasteRepeatCount += 1 }
@@ -569,6 +585,7 @@ final class InkCanvasView: NSView {
         if let rect = marqueeRect, marqueeStart != nil {
             selectedIDs = Set(state.note.strokes.filter { stroke in
                 guard stroke.bounds.intersects(rect) else { return false }
+                if stroke.tool == "image" { return true }
                 let points = cache[stroke.id]?.points ?? InkPathBuilder.make(stroke: stroke).points
                 if points.contains(where: { rect.contains($0) }) { return true }
                 let corners = [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
@@ -740,6 +757,20 @@ final class InkCanvasView: NSView {
         context.setAllowsAntialiasing(true)
         context.setShouldAntialias(true)
         for stroke in state.note.strokes where !erasedIDs.contains(stroke.id) {
+            if stroke.tool == "image" {
+                let image: NSImage?
+                if let cached = imageCache[stroke.id] { image = cached }
+                else { image = stroke.imagePNG.flatMap(NSImage.init(data:)); imageCache[stroke.id] = image }
+                if let image, stroke.samples.count == 2 {
+                    let a = stroke.samples[0].point, b = stroke.samples[1].point
+                    let rect = CGRect(x: min(a.x,b.x), y: min(a.y,b.y), width: abs(b.x-a.x), height: abs(b.y-a.y))
+                    context.saveGState()
+                    if selectedIDs.contains(stroke.id) { context.concatenate(selectionTransform) }
+                    image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+                    context.restoreGState()
+                }
+                continue
+            }
             let cached: CachedStroke
             if let existing = cache[stroke.id] { cached = existing }
             else {
