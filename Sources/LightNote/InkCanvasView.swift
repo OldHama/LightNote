@@ -141,6 +141,18 @@ final class InkCanvasView: NSView {
     private var moveStart: CGPoint?
     private var moveDelta = CGSize.zero
     private var active: InkStroke?
+    private var penIsStraight = false
+    var displayedStroke: InkStroke? {
+        guard let active else { return nil }
+        return penIsStraight ? active.straightened() : active
+    }
+    private func constrainPen(_ enabled: Bool) {
+        let next = active?.tool == "pen" && enabled
+        guard next != penIsStraight else { return }
+        let dirty = active?.bounds ?? .null
+        penIsStraight = next
+        if !dirty.isNull { setNeedsDisplay(dirty) }
+    }
     private var erasingLast: CGPoint?
     private var erasedIDs = Set<UUID>()
     private var liveInk = InkPathBuilder()
@@ -446,6 +458,7 @@ final class InkCanvasView: NSView {
         } else if !old.isNull { setNeedsDisplay(old) }
     }
     override func flagsChanged(with event: NSEvent) {
+        constrainPen(event.modifierFlags.contains(.shift))
         if shapeDraft != nil {
             let old = shapeDraft?.stroke?.bounds ?? .null
             shapeDraft?.constrained = event.modifierFlags.contains(.command)
@@ -618,6 +631,8 @@ final class InkCanvasView: NSView {
         lastTimestamp = event.timestamp
         diagnosticEvents += 1
         if tablet { diagnosticTabletEvents += 1 }
+        let oldLine = penIsStraight ? (displayedStroke?.bounds ?? .null) : .null
+        constrainPen(event.modifierFlags.contains(.shift))
         let previousHead = active?.freeArrowHeadBounds ?? .null
         let previous = active?.samples.last?.point
         active?.samples.append(sample)
@@ -637,7 +652,8 @@ final class InkCanvasView: NSView {
                                 height: max(changedStart.y, start.y, point.y) - min(changedStart.y, start.y, point.y))
             .insetBy(dx: -radius, dy: -radius)
         let headDirty = previousHead.union(active?.freeArrowHeadBounds ?? .null).insetBy(dx: -radius, dy: -radius)
-        setNeedsDisplay(dirty.union(curveDirty).union(headDirty))
+        let newLine = penIsStraight ? (displayedStroke?.bounds ?? .null) : .null
+        setNeedsDisplay(dirty.union(curveDirty).union(headDirty).union(oldLine).union(newLine))
     }
     private func erase(with event: NSEvent) {
         guard let previous = erasingLast else { return }
@@ -669,10 +685,12 @@ final class InkCanvasView: NSView {
             erasedIDs.removeAll()
             state.document?.eraseStrokes(ids: ids)
         }
-        guard let stroke = active, !stroke.samples.isEmpty else { return }
+        guard let stroke = displayedStroke, !stroke.samples.isEmpty else { penIsStraight = false; return }
+        let wasStraight = penIsStraight
         active = nil
+        penIsStraight = false
         liveInk.finish()
-        if stroke.tool == "freeArrow" {
+        if wasStraight || stroke.tool == "freeArrow" {
             let geometry = InkPathBuilder.make(stroke: stroke)
             cache[stroke.id] = CachedStroke(path: geometry.path.copy()!, bounds: stroke.bounds, points: geometry.points)
         } else {
@@ -800,8 +818,12 @@ final class InkCanvasView: NSView {
             let geometry = InkPathBuilder.make(stroke: shape)
             render(shape, path: geometry.path, in: context)
         }
-        if let active {
-            render(active, path: liveInk.path, tail: liveInk.lastPoint, in: context)
+        if let active = displayedStroke {
+            if penIsStraight {
+                let line = CGMutablePath()
+                line.addLines(between: active.samples.map(\.point))
+                render(active, path: line, in: context)
+            } else { render(active, path: liveInk.path, tail: liveInk.lastPoint, in: context) }
             let head = active.freeArrowHead
             if !head.isEmpty {
                 context.beginPath(); context.addLines(between: head)

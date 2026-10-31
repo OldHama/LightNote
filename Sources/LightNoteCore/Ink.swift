@@ -369,3 +369,14 @@ extension InkStroke {
         }
     }
 }
+
+
+extension InkStroke {
+    /// A constrained pen stroke remains ordinary ink for copying, erasing and old notes.
+    public func straightened() -> InkStroke {
+        guard tool == "pen", let first = samples.first, let last = samples.last else { return self }
+        var copy = self
+        copy.samples = [first, last]
+        return copy
+    }
+}

@@ -160,6 +160,7 @@ private struct ShortcutHelpView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("그리기 도구").font(.headline).padding(.bottom, 6)
                     row("P", "펜")
+                    row("⇧ + 펜 드래그", "시작점부터 커서까지 직선 · 떼면 자유 필기")
                     row("E", "획 지우개")
                     row("V", "사각형 선택 · 내부 드래그로 이동")
                     row("L", "레이저 · 다시 누르면 복원, 떼면 2초간 사라짐")

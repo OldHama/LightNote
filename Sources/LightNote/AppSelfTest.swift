@@ -530,8 +530,53 @@ enum AppSelfTest {
         begin(); canvas.keyDown(with:toolKey("\u{7f}",code:51)); end()
         try expect(!doc.state.note.strokes.contains{$0.id == free.id}, "Selected free arrow delete failed")
         doc.undoInk(nil); try expect(doc.state.note.strokes.last == free, "Free arrow deletion undo failed")
+        canvas.keyDown(with: toolKey("p",code:35))
+        func shiftFlags(_ down: Bool) -> NSEvent {
+            let raw = CGEvent(keyboardEventSource:nil,virtualKey:56,keyDown:down)!
+            raw.type = .flagsChanged; raw.flags = down ? .maskShift : []
+            return NSEvent(cgEvent:raw)!
+        }
+        let beforeLine = doc.state.note.strokes
+        begin()
+        canvas.mouseDown(with:event(.leftMouseDown,3000,1800,1200,modifiers:.shift))
+        canvas.mouseDragged(with:event(.leftMouseDragged,3020,1740,1201,modifiers:.shift))
+        canvas.mouseDragged(with:event(.leftMouseDragged,3100,1900,1202,modifiers:.shift))
+        try expect(canvas.displayedStroke?.samples.count == 2, "Shift pen preview is not straight")
+        canvas.flagsChanged(with:shiftFlags(false))
+        try expect(canvas.displayedStroke?.samples.count == 3, "Shift release did not restore free preview")
+        canvas.flagsChanged(with:shiftFlags(true))
+        try expect(canvas.displayedStroke?.samples.count == 2, "Shift press without mouse movement did not constrain")
+        canvas.mouseUp(with:event(.leftMouseUp,3150,1870,1203,modifiers:.shift)); end()
+        let line = doc.state.note.strokes.last!
+        try expect(line.tool == "pen" && line.samples.count == 2 && line.samples.first!.point == CGPoint(x:3000,y:1800) && line.samples.last!.point == CGPoint(x:3150,y:1870), "Shift line lost anchored endpoints")
+        let savedLine = try NoteFile.decode(doc.data(ofType:"com.lightnote.note"))
+        try expect(savedLine.strokes.last == line, "Shift line save failed")
+        doc.undoInk(nil); try expect(doc.state.note.strokes == beforeLine,"Shift line undo not atomic")
+        doc.redoInk(nil); try expect(doc.state.note.strokes.last == line,"Shift line redo failed")
+        begin()
+        canvas.mouseDown(with:event(.leftMouseDown,3000,1800,1210))
+        canvas.mouseDragged(with:event(.leftMouseDragged,3020,1740,1211))
+        canvas.mouseDragged(with:event(.leftMouseDragged,3100,1900,1212))
+        canvas.flagsChanged(with:shiftFlags(true))
+        try expect(canvas.displayedStroke?.samples.count == 2,"Mid-stroke Shift did not straighten")
+        canvas.mouseUp(with:event(.leftMouseUp,3150,1870,1213,modifiers:.shift)); end()
+        try expect(doc.state.note.strokes.last!.samples.count == 2,"Mid-stroke line was not committed straight")
+        begin()
+        canvas.mouseDown(with:event(.leftMouseDown,3000,1800,1220,modifiers:.shift))
+        canvas.mouseDragged(with:event(.leftMouseDragged,3020,1740,1221,modifiers:.shift))
+        canvas.flagsChanged(with:shiftFlags(false))
+        canvas.mouseDragged(with:event(.leftMouseDragged,3100,1900,1222))
+        canvas.mouseUp(with:event(.leftMouseUp,3150,1870,1223)); end()
+        try expect(doc.state.note.strokes.last!.samples.count == 4,"Released Shift pen remained constrained")
+        canvas.keyDown(with:toolKey("q",code:12))
+        begin()
+        canvas.mouseDown(with:event(.leftMouseDown,3000,1800,1230,modifiers:.shift))
+        canvas.mouseDragged(with:event(.leftMouseDragged,3020,1740,1231,modifiers:.shift))
+        canvas.mouseDragged(with:event(.leftMouseDragged,3100,1900,1232,modifiers:.shift))
+        canvas.mouseUp(with:event(.leftMouseUp,3150,1870,1233,modifiers:.shift)); end()
+        try expect(doc.state.note.strokes.last!.tool == "freeArrow" && doc.state.note.strokes.last!.samples.count == 4,"Shift changed Q free arrow behavior")
         doc.state.selectTool(.pen)
-        print("Verified: Q free-arrow drawing/head-selection/delete/undo/redo/save; 100 taps; 2002-sample stroke; mid-stroke save continuity; style; undo/redo; interruption; dot pixels; grid pixels/style undo/redo; stroke eraser click/sweep/undo/redo/keys; rectangle selection/move/undo/redo/save; zoom transforms/ink/eraser/reset; outer viewport grid/input/reopen; shapes/command circle/corner resize/undo/redo; laser hold/release/expiry/non-persistence; managed note automatic save/reopen; disk roundtrip; corrupt read")
+        print("Verified: Shift pen line/press/release/mid-stroke/undo/redo/save; Q free-arrow drawing/head-selection/delete/undo/redo/save; 100 taps; 2002-sample stroke; mid-stroke save continuity; style; undo/redo; interruption; dot pixels; grid pixels/style undo/redo; stroke eraser click/sweep/undo/redo/keys; rectangle selection/move/undo/redo/save; zoom transforms/ink/eraser/reset; outer viewport grid/input/reopen; shapes/command circle/corner resize/undo/redo; laser hold/release/expiry/non-persistence; managed note automatic save/reopen; disk roundtrip; corrupt read")
         doc.updateChangeCount(.changeCleared)
         doc.close()
     }
@@ -951,7 +996,9 @@ extension AppSelfTest {
         let shape=InkStroke.shape(.rectangle,from:CGPoint(x:300,y:300),to:CGPoint(x:400,y:350),constrained:false,color:.green,width:2)!
         var free=InkStroke(samples:[InkSample(x:500,y:500,time:1),InkSample(x:520,y:460,time:2),InkSample(x:560,y:490,time:3)])
         free.tool="freeArrow"
-        edit { doc.appendStrokes([image,shape,free],actionName:"이미지·도형·자유 화살표") }
+        var line=InkStroke(samples:[InkSample(x:600,y:500,time:1),InkSample(x:610,y:400,time:2),InkSample(x:700,y:550,time:3)])
+        line=line.straightened()
+        edit { doc.appendStrokes([image,shape,free,line],actionName:"이미지·도형·자유 화살표·직선") }
         if CommandLine.arguments.contains("--kill-after-conflict") {
             let external=NoteFile(strokes:[InkStroke(color:.red,samples:[InkSample(x:54321,y:1,time:1)])])
             try external.encoded().write(to:source,options:.atomic)
