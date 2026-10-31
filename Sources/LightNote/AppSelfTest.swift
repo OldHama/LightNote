@@ -9,6 +9,7 @@ enum AppSelfTest {
             if !value() { throw Failure(message: message) }
         }
         let doc = NoteDocument()
+        NSDocumentController.shared.addDocument(doc)
         try expect(doc.state.note.paperStyle == .grid, "New note should default to grid")
         doc.state.note.paperStyle = .blank // Fixture for paper switching undo checks below.
         doc.makeWindowControllers()
@@ -385,6 +386,21 @@ enum AppSelfTest {
         let arrowFile = try NoteFile.decode(doc.data(ofType: "com.lightnote.note"))
         try expect(arrowFile.strokes.last == arrow, "Arrow save failed")
         doc.state.selectTool(.pen)
+        let beforeKeyboardUndo = doc.state.note.strokes
+        window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(window.contentView)
+        let undoKey = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
+            timestamp: 900, windowNumber: window.windowNumber, context: nil,
+            characters: "z", charactersIgnoringModifiers: "z", isARepeat: false, keyCode: 6)!
+        NSApp.mainMenu?.items.forEach { $0.submenu?.update() }
+        try expect(NSApp.mainMenu?.performKeyEquivalent(with: undoKey) == true, "Command-Z menu shortcut not routed")
+        try expect(doc.state.note.strokes == Array(beforeKeyboardUndo.dropLast()), "Command-Z did not undo one stroke")
+        let redoKey = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command, .shift],
+            timestamp: 901, windowNumber: window.windowNumber, context: nil,
+            characters: "Z", charactersIgnoringModifiers: "Z", isARepeat: false, keyCode: 6)!
+        NSApp.mainMenu?.items.forEach { $0.submenu?.update() }
+        try expect(NSApp.mainMenu?.performKeyEquivalent(with: redoKey) == true, "Command-Shift-Z not routed")
+        try expect(doc.state.note.strokes == beforeKeyboardUndo, "Keyboard redo lost stroke: expected \(beforeKeyboardUndo.count), got \(doc.state.note.strokes.count)")
         print("Verified: 100 taps; 2002-sample stroke; mid-stroke save continuity; style; undo/redo; interruption; dot pixels; grid pixels/style undo/redo; stroke eraser click/sweep/undo/redo/keys; rectangle selection/move/undo/redo/save; zoom transforms/ink/eraser/reset; outer viewport grid/input/reopen; shapes/command circle/corner resize/undo/redo; laser hold/release/expiry/non-persistence; managed note automatic save/reopen; disk roundtrip; corrupt read")
         doc.updateChangeCount(.changeCleared)
         doc.close()

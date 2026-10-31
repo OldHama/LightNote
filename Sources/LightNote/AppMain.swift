@@ -15,7 +15,7 @@ struct LightNoteMain {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMenuItemValidation {
     private lazy var updaterController = SPUStandardUpdaterController(
         startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
     private var postponedUpdate: (() -> Void)?
@@ -46,6 +46,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
             documents.openLastDocument()
         }
         updaterController.startUpdater()
+    }
+    private var activeNote: NoteDocument? {
+        (NSApp.keyWindow?.windowController?.document as? NoteDocument)
+            ?? (NSApp.mainWindow?.windowController?.document as? NoteDocument)
+            ?? (documents.currentDocument as? NoteDocument)
+            ?? documents.documents.compactMap { $0 as? NoteDocument }.last
+    }
+    private var currentUndoManager: UndoManager? {
+        if let editor = NSApp.keyWindow?.firstResponder as? NSTextView { return editor.undoManager }
+        return activeNote?.undoManager
+    }
+    @objc func undoDocument(_ sender: Any?) {
+        if let editor = NSApp.keyWindow?.firstResponder as? NSTextView { editor.undoManager?.undo() }
+        else { activeNote?.undoInk(sender) }
+    }
+    @objc func redoDocument(_ sender: Any?) {
+        if let editor = NSApp.keyWindow?.firstResponder as? NSTextView { editor.undoManager?.redo() }
+        else { activeNote?.redoInk(sender) }
+    }
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(undoDocument(_:)) { return currentUndoManager?.canUndo ?? false }
+        if menuItem.action == #selector(redoDocument(_:)) { return currentUndoManager?.canRedo ?? false }
+        return true
     }
     @objc func checkForUpdates(_ sender: Any?) {
         if let install = postponedUpdate {
@@ -113,8 +136,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         item(file, "저장", #selector(NSDocument.save(_:)), "s")
         item(file, "다른 이름으로 저장…", #selector(NSDocument.saveAs(_:)), "s", modifiers: [.command, .shift])
         let edit = submenu("편집")
-        item(edit, "실행 취소", Selector(("undo:")), "z")
-        item(edit, "다시 실행", Selector(("redo:")), "z", modifiers: [.command, .shift])
+        item(edit, "실행 취소", #selector(undoDocument(_:)), "z")
+        edit.items.last?.target = self
+        item(edit, "다시 실행", #selector(redoDocument(_:)), "Z", modifiers: [.command, .shift])
+        edit.items.last?.target = self
         edit.addItem(.separator())
         item(edit, "잘라내기", #selector(NSText.cut(_:)), "x")
         item(edit, "복사", #selector(NSText.copy(_:)), "c")
