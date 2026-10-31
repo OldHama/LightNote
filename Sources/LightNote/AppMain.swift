@@ -40,6 +40,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
             name: AppPreferences.changed, object: AppPreferences.shared)
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if CommandLine.arguments.contains("--save-benchmark") {
+            Task { @MainActor in
+                do { try await AppSelfTest.benchmarkSaving(); exit(0) }
+                catch { fputs("SAVE_BENCHMARK_FAILED: \(error)\n", stderr); exit(1) }
+            }
+            return
+        }
         NSApp.activate(ignoringOtherApps: true)
         if CommandLine.arguments.contains("--self-test") {
             do {

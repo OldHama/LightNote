@@ -509,3 +509,85 @@ enum AppSelfTest {
         doc.close()
     }
 }
+
+
+extension AppSelfTest {
+    /// Synthetic save workload only: does not open or modify personal documents.
+    static func benchmarkSaving() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("LightNote-save-benchmark-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        @MainActor final class Heartbeat {
+            var last = ProcessInfo.processInfo.systemUptime
+            var maxGap = 0.0
+            func tick() {
+                let now = ProcessInfo.processInfo.systemUptime
+                maxGap = max(maxGap, now-last); last = now
+            }
+            func reset() { last = ProcessInfo.processInfo.systemUptime; maxGap = 0 }
+        }
+        let beat = Heartbeat()
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.005, repeats: true) { _ in
+            MainActor.assumeIsolated { beat.tick() }
+        }
+        defer { timer.invalidate() }
+        print("SAVE_BENCHMARK optimized=\(!_isDebugAssertConfiguration()) heartbeat_ms=5 samples_per_stroke=100 repeats=3")
+        print("strokes,bytes,mode,run,elapsed_ms,max_main_gap_ms")
+        for count in [1000, 10000, 20000] {
+            let doc = NoteDocument()
+            doc.state.note.strokes = (0..<count).map { i in
+                InkStroke(samples: (0..<100).map { j in
+                    InkSample(x: Double(i%100)*6+Double(j)*0.2,
+                              y: Double(i/100)*4+sin(Double(j)*0.1)*10,
+                              time: Double(i)+Double(j)*0.001, pressure: 0.5)
+                })
+            }
+            for run in 1...3 {
+                for mode in ["main_encode", "main_safe_save", "background_prototype"] {
+                    try await Task.sleep(for: .milliseconds(20))
+                    beat.reset()
+                    let start = ProcessInfo.processInfo.systemUptime
+                    let bytes: Int
+                    if mode == "main_encode" {
+                        bytes = try doc.data(ofType: "com.lightnote.note").count
+                    } else if mode == "main_safe_save" {
+                        try doc.persistNow(directory: directory)
+                        bytes = try doc.fileURL!.resourceValues(forKeys: [.fileSizeKey]).fileSize!
+                    } else {
+                        let snapshot = doc.state.note
+                        let url = directory.appendingPathComponent("prototype.lightnote")
+                        let worker = Task.detached(priority: .utility) {
+                            let data = try snapshot.encoded()
+                            try data.write(to: url, options: .atomic)
+                            return data.count
+                        }
+                        bytes = try await worker.value
+                    }
+                    let elapsed = (ProcessInfo.processInfo.systemUptime-start)*1000
+                    try await Task.sleep(for: .milliseconds(15))
+                    print(String(format: "%d,%d,%@,%d,%.2f,%.2f", count, bytes, mode, run, elapsed, beat.maxGap*1000))
+                }
+            }
+            // Prove value snapshots do not acquire later input while a worker owns them.
+            let snapshot = doc.state.note
+            let url = directory.appendingPathComponent("concurrent.lightnote")
+            let worker = Task.detached(priority: .utility) {
+                let data = try snapshot.encoded()
+                try data.write(to: url, options: .atomic)
+            }
+            let extra = InkStroke(samples: [InkSample(x: 12, y: 34, time: 99)])
+            doc.state.note.strokes.append(extra)
+            try await worker.value
+            let saved = try NoteFile.decode(Data(contentsOf: url))
+            guard saved == snapshot, doc.state.note.strokes.count == count+1 else {
+                throw Failure(message: "Concurrent snapshot changed or later input lost")
+            }
+            try doc.persistNow(directory: directory)
+            let latest = try NoteFile.decode(Data(contentsOf: doc.fileURL!))
+            guard latest == doc.state.note else { throw Failure(message: "Latest save omitted input") }
+            doc.updateChangeCount(.changeCleared); doc.close()
+            print("SNAPSHOT_CHECK_PASSED strokes=\(count)")
+        }
+        print("SAVE_BENCHMARK_PASSED")
+    }
+}
