@@ -82,7 +82,7 @@ final class NoteDocument: NSDocument {
         window.contentView = NSHostingView(rootView: root)
         window.setFrameAutosaveName("LightNoteEditor")
         window.center()
-        addWindowController(NSWindowController(window: window))
+        addWindowController(NoteWindowController(window: window))
     }
 
     @objc private func rememberLastDocument() {
@@ -100,7 +100,13 @@ final class NoteDocument: NSDocument {
         else {
             let folder = directory ?? LightNoteDocumentController.notesDirectory
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            destination = folder.appendingPathComponent("노트-" + UUID().uuidString + ".lightnote")
+            var number = 1
+            var candidate = folder.appendingPathComponent("새 노트.lightnote")
+            while FileManager.default.fileExists(atPath: candidate.path) {
+                number += 1
+                candidate = folder.appendingPathComponent("새 노트 \(number).lightnote")
+            }
+            destination = candidate
         }
         try writeSafely(to: destination, ofType: type, for: .saveOperation)
         fileURL = destination
@@ -240,5 +246,21 @@ final class NoteDocument: NSDocument {
     override func close() {
         state.finishInput?()
         super.close()
+    }
+}
+
+/// Keep internal legacy filenames and file extensions out of the document title bar.
+@MainActor
+final class NoteWindowController: NSWindowController {
+    static func readableTitle(for url: URL?) -> String {
+        guard let url else { return "새 노트" }
+        let name = url.deletingPathExtension().lastPathComponent
+        if name.hasPrefix("노트-"), UUID(uuidString: String(name.dropFirst(3))) != nil {
+            return "새 노트"
+        }
+        return name
+    }
+    override func windowTitle(forDocumentDisplayName displayName: String) -> String {
+        Self.readableTitle(for: document?.fileURL)
     }
 }

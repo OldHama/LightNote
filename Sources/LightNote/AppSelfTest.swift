@@ -256,6 +256,13 @@ enum AppSelfTest {
         let managed = NoteDocument()
         try managed.persistNow(directory: managedFolder)
         let managedURL = managed.fileURL!
+        try expect(managedURL.lastPathComponent == "새 노트.lightnote", "New note name is not readable")
+        try expect(NoteWindowController.readableTitle(for: URL(fileURLWithPath: "/tmp/노트-" + UUID().uuidString + ".lightnote")) == "새 노트", "Legacy UUID exposed in title")
+        try expect(NoteWindowController.readableTitle(for: URL(fileURLWithPath: "/tmp/수학 정리.lightnote")) == "수학 정리", "User title not preserved")
+        let secondManaged = NoteDocument()
+        try secondManaged.persistNow(directory: managedFolder)
+        try expect(secondManaged.fileURL?.lastPathComponent == "새 노트 2.lightnote", "New note overwrote existing file")
+        secondManaged.close()
         try expect(FileManager.default.fileExists(atPath: managedURL.path), "New note not automatically stored")
         try expect(!managed.isDraft && NoteDocument.autosavesDrafts == false, "Managed note remains a draft")
         managed.undoManager?.groupsByEvent = false
