@@ -91,7 +91,8 @@ final class InkCanvasView: NSView {
     private struct LaserTrace {
         let path: CGPath
         let bounds: CGRect
-        let releasedAt: TimeInterval
+        var releasedAt: TimeInterval?
+        var opacity: Double = 1
     }
     private var activeLaser: InkPathBuilder?
     private var activeLaserBounds = CGRect.null
@@ -221,9 +222,17 @@ final class InkCanvasView: NSView {
         window?.makeFirstResponder(self)
         guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
         if state.tool == .laser {
+            let now = ProcessInfo.processInfo.systemUptime
+            // A new hold also freezes any still-visible previous laser traces.
+            for index in laserTraces.indices {
+                laserTraces[index].opacity *= LaserTiming.opacity(releasedAt: laserTraces[index].releasedAt, now: now)
+                laserTraces[index].releasedAt = nil
+            }
+            laserTraces.removeAll { $0.opacity <= 0 }
             activeLaser = InkPathBuilder()
             activeLaserBounds = .null
             appendLaser(event)
+            startLaserTimer()
             return
         }
         if state.tool == .selection {
@@ -301,13 +310,19 @@ final class InkCanvasView: NSView {
         activeLaserBounds = activeLaserBounds.union(CGRect(origin: point, size: .zero))
         setNeedsDisplay(segment.insetBy(dx: -laserPadding, dy: -laserPadding))
     }
-    private func finishLaser() {
+    private func finishLaser(releasedAt: TimeInterval = ProcessInfo.processInfo.systemUptime) {
         guard let activeLaser else { return }
         activeLaser.finish()
+        for index in laserTraces.indices where laserTraces[index].releasedAt == nil {
+            laserTraces[index].releasedAt = releasedAt
+        }
         laserTraces.append(LaserTrace(path: activeLaser.path.copy()!, bounds: activeLaserBounds,
-                                      releasedAt: ProcessInfo.processInfo.systemUptime))
+                                      releasedAt: releasedAt))
         self.activeLaser = nil
         setNeedsDisplay(activeLaserBounds.insetBy(dx: -laserPadding, dy: -laserPadding))
+        startLaserTimer()
+    }
+    private func startLaserTimer() {
         if laserTimer == nil {
             let timer = Timer(timeInterval: 1.0/60, repeats: true) { [weak self] timer in
                 guard let self else { timer.invalidate(); return }
@@ -319,12 +334,16 @@ final class InkCanvasView: NSView {
             RunLoop.main.add(timer, forMode: .common)
         }
     }
-    func advanceLaser(now: TimeInterval) {
+    func advanceLaser(now: TimeInterval, leftButtonDown: Bool? = nil) {
+        // Recover a release outside the window without treating saves/zoom as mouseUp.
+        if activeLaser != nil, !(leftButtonDown ?? (NSEvent.pressedMouseButtons & 1 != 0)) {
+            finishLaser(releasedAt: now)
+        }
         for trace in laserTraces {
             setNeedsDisplay(trace.bounds.insetBy(dx: -laserPadding, dy: -laserPadding))
         }
-        laserTraces.removeAll { LaserTiming.opacity(releasedAt: $0.releasedAt, now: now) <= 0 }
-        if laserTraces.isEmpty { laserTimer?.invalidate(); laserTimer = nil }
+        laserTraces.removeAll { $0.opacity * LaserTiming.opacity(releasedAt: $0.releasedAt, now: now) <= 0 }
+        if laserTraces.isEmpty && activeLaser == nil { laserTimer?.invalidate(); laserTimer = nil }
     }
     private func drawLaser(_ path: CGPath, tail: CGPoint?, opacity: Double, context: CGContext) {
         guard opacity > 0 else { return }
@@ -457,7 +476,8 @@ final class InkCanvasView: NSView {
         erasingLast = point
     }
     func finishStroke(reason: String) {
-        finishLaser()
+        // Only an actual mouse release (or replacement down event) starts laser fading.
+        if reason == "new-down" { finishLaser() }
         finishSelection()
         if erasingLast != nil {
             erasingLast = nil
@@ -566,7 +586,7 @@ final class InkCanvasView: NSView {
         }
         let now = ProcessInfo.processInfo.systemUptime
         for trace in laserTraces {
-            drawLaser(trace.path, tail: nil, opacity: LaserTiming.opacity(releasedAt: trace.releasedAt, now: now), context: context)
+            drawLaser(trace.path, tail: nil, opacity: trace.opacity * LaserTiming.opacity(releasedAt: trace.releasedAt, now: now), context: context)
         }
         if let activeLaser { drawLaser(activeLaser.path, tail: activeLaser.lastPoint, opacity: 1, context: context) }
     }
