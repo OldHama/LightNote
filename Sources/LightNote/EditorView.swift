@@ -38,10 +38,6 @@ struct EditorView: View {
                     DrawingToolStrip(state: state)
                     Button { state.showStickers = true } label: { Label("스티커",systemImage:"face.smiling") }
                         .topTooltip("등록한 스티커 사용").accessibilityLabel("스티커함")
-                    Button { state.copySelectionPNG?() } label: { Image(systemName: "photo.on.rectangle") }
-                        .disabled(!state.hasSelection).topTooltip("선택 영역 PNG 복사 · ⌃⌘C").accessibilityLabel("선택 영역 PNG 복사")
-                    Button { state.exportSelectionPNG?() } label: { Image(systemName: "square.and.arrow.up") }
-                        .disabled(!state.hasSelection).topTooltip("선택 영역 PNG 내보내기 · ⌘⇧E").accessibilityLabel("선택 영역 PNG 내보내기")
                     ColorPresetStrip(state: state)
                     ColorPicker("색상", selection: Binding(get: { Color(cgColor: state.color.cgColor) }, set: {
                         guard let c = NSColor($0).usingColorSpace(.sRGB) else { return }

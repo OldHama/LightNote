@@ -467,6 +467,38 @@ final class InkCanvasView: NSView {
         if !event.isEnteringProximity { finishStroke(reason: "proximity-exit") }
     }
 
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let point = convert(event.locationInWindow,from:nil)
+        guard state.tool == .selection, !selectedIDs.isEmpty,
+              let rect = selectionBounds?.applying(selectionTransform), rect.contains(point) else { return nil }
+        focusForDrawing()
+        finishStroke(reason:"selection-context-menu")
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let copy = NSMenuItem(title:"복사",action:nil,keyEquivalent:"")
+        let copyMenu = NSMenu(); copyMenu.autoenablesItems = false
+        let pngCopy = NSMenuItem(title:"PNG 클립보드 복사",action:#selector(contextCopyPNG(_:)),keyEquivalent:"")
+        pngCopy.target = self; copyMenu.addItem(pngCopy)
+        let pngSave = NSMenuItem(title:"PNG 파일 저장…",action:#selector(contextSavePNG(_:)),keyEquivalent:"")
+        pngSave.target = self; copyMenu.addItem(pngSave)
+        copy.submenu = copyMenu; menu.addItem(copy)
+        let create = NSMenuItem(title:"생성",action:nil,keyEquivalent:"")
+        let createMenu = NSMenu(); createMenu.autoenablesItems = false
+        let sticker = NSMenuItem(title:"스티커 생성",action:#selector(contextCreateSticker(_:)),keyEquivalent:"")
+        sticker.target = self; createMenu.addItem(sticker)
+        create.submenu = createMenu; menu.addItem(create)
+        return menu
+    }
+    @objc private func contextCopyPNG(_ sender: Any?) { performPNGAction(export:false) }
+    @objc private func contextSavePNG(_ sender: Any?) { performPNGAction(export:true) }
+    @objc private func contextCreateSticker(_ sender: Any?) {
+        do {
+            guard let data = try selectionPNG() else { return }
+            try StickerLibrary.shared.add(data:data,name:"선택 영역")
+            state.showStickers = true
+        } catch { NSApp.presentError(error) }
+    }
+
     /// Render selected objects only, in document order, without handles or laser.
     /// Paper/grid is included for a ready-to-share lesson image, independent of zoom.
     func selectionPNG() throws -> Data? {

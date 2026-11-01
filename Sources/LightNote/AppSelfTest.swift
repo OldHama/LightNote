@@ -553,6 +553,27 @@ enum AppSelfTest {
         try expect(diskPNG == exportedPNG,"Exported file differs from PNG clipboard")
         try expect(destinationDoc.state.note == beforePNG && destinationDoc.undoManager?.canUndo == undoBeforePNG && destinationDoc.state.hasSelection,
                    "PNG export changed document/undo/selection")
+        func contextEvent(_ point:CGPoint) -> NSEvent {
+            NSEvent.mouseEvent(with:.rightMouseDown,location:destinationCanvas.convert(point,to:nil),modifierFlags:[],
+                timestamp:1390,windowNumber:0,context:nil,eventNumber:0,clickCount:1,pressure:0)!
+        }
+        guard let contextMenu = destinationCanvas.menu(for:contextEvent(CGPoint(x:exportedRect.midX,y:exportedRect.midY))),
+              contextMenu.items.map(\.title) == ["복사","생성"],
+              let copyMenu = contextMenu.items[0].submenu,
+              let createMenu = contextMenu.items[1].submenu else { throw Failure(message:"Selection context menu missing") }
+        try expect(copyMenu.items.map(\.title) == ["PNG 클립보드 복사","PNG 파일 저장…"],"PNG context choices incorrect")
+        try expect(copyMenu.items[0].target === destinationCanvas && copyMenu.items[0].action == NSSelectorFromString("contextCopyPNG:") &&
+                   copyMenu.items[1].target === destinationCanvas && copyMenu.items[1].action == NSSelectorFromString("contextSavePNG:"),
+                   "Context PNG actions not connected")
+        try expect(destinationCanvas.menu(for:contextEvent(CGPoint(x:crop.minX-30,y:crop.minY-30))) == nil,"Context menu opened outside selection")
+        let beforeContextStickers = Set(StickerLibrary.shared.stickers.map(\.id))
+        createMenu.performActionForItem(at:0)
+        let createdContextStickers = StickerLibrary.shared.stickers.filter{!beforeContextStickers.contains($0.id)}
+        try expect(createdContextStickers.count == 1 && destinationDoc.state.showStickers,"Context sticker creation failed")
+        let createdContextPNG = try StickerLibrary.shared.data(for:createdContextStickers[0])
+        try expect(createdContextPNG == exportedPNG && destinationDoc.state.note == beforePNG,"Context sticker changed note or rendered different content")
+        try StickerLibrary.shared.remove(createdContextStickers[0])
+        destinationDoc.state.showStickers = false
         let lockedIDs = Set(exportObjects.map(\.id))
         let lockBitmap = destinationCanvas.bitmapImageRepForCachingDisplay(in:destinationCanvas.bounds)!
         destinationCanvas.cacheDisplay(in:destinationCanvas.bounds,to:lockBitmap)
