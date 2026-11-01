@@ -20,31 +20,31 @@ struct EditorView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 14) {
                     Button { NSDocumentController.shared.newDocument(nil) } label: { Image(systemName: "doc.badge.plus") }
-                        .help("새 노트 · ⌘N").accessibilityLabel("새 노트")
+                        .topTooltip("새 노트 · ⌘N").accessibilityLabel("새 노트")
                     Button { NSDocumentController.shared.openDocument(nil) } label: { Image(systemName: "folder") }
-                        .help("열기 · ⌘O").accessibilityLabel("열기")
+                        .topTooltip("열기 · ⌘O").accessibilityLabel("열기")
                     Button { state.finishInput?(); state.document?.save(nil) } label: { Image(systemName: "square.and.arrow.down") }
-                        .help("저장 · ⌘S").accessibilityLabel("저장")
+                        .topTooltip("저장 · ⌘S").accessibilityLabel("저장")
                     Button { state.showShortcuts = true } label: {
                         Image(systemName: "questionmark.circle")
-                    }.help("단축키 도움말 · /").accessibilityLabel("단축키 도움말")
+                    }.topTooltip("단축키 도움말 · /").accessibilityLabel("단축키 도움말")
                     Divider().frame(height: 22)
                     Button { state.document?.undoInk(nil) } label: { Image(systemName: "arrow.uturn.backward") }
-                        .disabled(!state.canUndo).help("실행 취소 · ⌘Z").accessibilityLabel("실행 취소")
+                        .disabled(!state.canUndo).topTooltip("실행 취소 · ⌘Z").accessibilityLabel("실행 취소")
                     Button { state.document?.redoInk(nil) } label: { Image(systemName: "arrow.uturn.forward") }
-                        .disabled(!state.canRedo).help("다시 실행 · ⌘⇧Z").accessibilityLabel("다시 실행")
+                        .disabled(!state.canRedo).topTooltip("다시 실행 · ⌘⇧Z").accessibilityLabel("다시 실행")
                     Divider().frame(height: 22)
                     DrawingToolStrip(state: state)
                     ColorPresetStrip(state: state)
                     ColorPicker("색상", selection: Binding(get: { Color(cgColor: state.color.cgColor) }, set: {
                         guard let c = NSColor($0).usingColorSpace(.sRGB) else { return }
                         state.color = InkColor(c.redComponent, c.greenComponent, c.blueComponent)
-                    }), supportsOpacity: false).labelsHidden().help("사용자 지정 색상")
+                    }), supportsOpacity: false).labelsHidden().topTooltip("사용자 지정 색상")
                     Picker("두께", selection: $state.width) {
                         ForEach(NoteState.penWidths, id: \.self) { width in
                             Text(String(format: "%.1f pt", width)).tag(width)
                         }
-                    }.frame(width: 110).labelsHidden().help("펜 두께 · [ 얇게 / ] 두껍게")
+                    }.frame(width: 110).labelsHidden().topTooltip("펜 두께 · [ 얇게 / ] 두껍게")
                     Divider().frame(height: 22)
                     Picker("용지", selection: Binding(
                         get: { state.note.paperStyle },
@@ -52,7 +52,7 @@ struct EditorView: View {
                     )) {
                         Text("무지").tag(PaperStyle.blank)
                         Text("모눈").tag(PaperStyle.grid)
-                    }.frame(width: 120).help("용지 유형 · 무지 / 모눈")
+                    }.frame(width: 120).topTooltip("용지 유형 · 무지 / 모눈")
                 }
                 .buttonStyle(.borderless)
                 .padding(.horizontal, 18).frame(height: 58)
@@ -66,7 +66,7 @@ struct EditorView: View {
                         .font(.system(size: 22)).foregroundStyle(Color.blue)
                 }
                 .buttonStyle(.plain)
-                .help("LightNote " + version + " 다운로드 및 업데이트")
+                .topTooltip("LightNote " + version + " 다운로드 및 업데이트")
                 .accessibilityLabel("새 버전 다운로드")
                 .padding(.horizontal, 16)
             }
@@ -83,7 +83,7 @@ struct EditorView: View {
                 Button { state.resetZoom?() } label: {
                     Text("\(Int((state.zoom * 100).rounded()))%")
                         .monospacedDigit()
-                }.buttonStyle(.borderless).help("클릭하여 100%로 복원 · 두 손가락 핀치로 확대/축소")
+                }.buttonStyle(.borderless).topTooltip("클릭하여 100%로 복원 · 두 손가락 핀치로 확대/축소")
                 Text("·").foregroundStyle(.tertiary)
                 Text("\(state.strokeCount)개 획")
                 Text("·").foregroundStyle(.tertiary)
@@ -107,7 +107,7 @@ struct DrawingToolStrip: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(DrawingToolButtonStyle(tint: value == .laser ? .red : .accentColor))
-        .help(help)
+        .topTooltip(help)
         .accessibilityLabel(value.title)
     }
     var body: some View {
@@ -140,7 +140,7 @@ struct ColorPresetStrip: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(DrawingToolButtonStyle(tint: .accentColor))
-                .help(preset.name + " · " + preset.key)
+                .topTooltip(preset.name + " · " + preset.key)
                 .accessibilityLabel(preset.name + " 펜")
             }
         }
@@ -173,6 +173,79 @@ private struct DrawingToolButtonStyle: ButtonStyle {
     }
 }
 
+/// A child panel keeps the tip above its control, outside the horizontal scroll clip.
+private struct TopTooltip: NSViewRepresentable {
+    let text: String
+    func makeNSView(context: Context) -> TooltipAnchorView { TooltipAnchorView(text: text) }
+    func updateNSView(_ view: TooltipAnchorView, context: Context) { view.text = text }
+    static func dismantleNSView(_ view: TooltipAnchorView, coordinator: ()) { view.hideTooltip() }
+}
+private extension View {
+    func topTooltip(_ text: String) -> some View { background(TopTooltip(text: text)) }
+}
+
+@MainActor
+final class TooltipAnchorView: NSView {
+    var text: String { didSet { if oldValue != text { hideTooltip() } } }
+    private(set) var tooltipWindow: NSPanel?
+    private var area: NSTrackingArea?
+    init(text: String) { self.text = text; super.init(frame: .zero) }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func updateTrackingAreas() {
+        hideTooltip()
+        if let area { removeTrackingArea(area) }
+        let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        addTrackingArea(area); self.area = area
+        super.updateTrackingAreas()
+    }
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        hideTooltip()
+        NotificationCenter.default.removeObserver(self)
+        if let newWindow {
+            for name in [NSWindow.didResignKeyNotification, NSWindow.willCloseNotification, NSWindow.didMiniaturizeNotification] {
+                NotificationCenter.default.addObserver(self, selector: #selector(hideTooltip), name: name, object: newWindow)
+            }
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+    override func mouseEntered(with event: NSEvent) { showTooltip() }
+    override func mouseExited(with event: NSEvent) { hideTooltip() }
+    func showTooltip() {
+        guard tooltipWindow == nil, let window, window.isKeyWindow, !text.isEmpty,
+              !visibleRect.isEmpty else { return }
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 12)
+        label.textColor = .labelColor
+        label.sizeToFit()
+        let size = NSSize(width: label.frame.width + 20, height: label.frame.height + 12)
+        let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size),
+                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isReleasedWhenClosed = false
+        panel.isOpaque = false; panel.backgroundColor = .clear
+        panel.hasShadow = true; panel.ignoresMouseEvents = true
+        panel.level = .popUpMenu
+        let background = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
+        background.material = .popover; background.blendingMode = .behindWindow
+        background.state = .active; background.wantsLayer = true
+        background.layer?.cornerRadius = 6; background.layer?.masksToBounds = true
+        label.setFrameOrigin(NSPoint(x: 10, y: 6)); background.addSubview(label)
+        panel.contentView = background
+        let anchor = window.convertToScreen(convert(bounds, to: nil))
+        let screen = window.screen?.frame ?? anchor.insetBy(dx: -1000, dy: -1000)
+        let x = max(screen.minX + 4, min(anchor.midX - size.width/2, screen.maxX - size.width - 4))
+        panel.setFrameOrigin(NSPoint(x: x, y: anchor.maxY + 6))
+        tooltipWindow = panel
+        window.addChildWindow(panel, ordered: .above)
+        panel.orderFront(nil)
+    }
+    @objc func hideTooltip() {
+        guard let panel = tooltipWindow else { return }
+        panel.parent?.removeChildWindow(panel)
+        panel.orderOut(nil); panel.close(); tooltipWindow = nil
+    }
+}
+
 private struct ShortcutHelpView: View {
     @ObservedObject private var preferences = AppPreferences.shared
     @Environment(\.dismiss) private var dismiss
@@ -192,7 +265,7 @@ private struct ShortcutHelpView: View {
                 Spacer()
                 Button { dismiss() } label: { Image(systemName: "xmark") }
                     .buttonStyle(.borderless).keyboardShortcut(.cancelAction)
-                    .help("닫기 · Esc").accessibilityLabel("도움말 닫기")
+                    .topTooltip("닫기 · Esc").accessibilityLabel("도움말 닫기")
             }.padding(20)
             Divider()
             ScrollView {

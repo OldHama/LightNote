@@ -1208,5 +1208,19 @@ extension AppSelfTest {
             }
         }
 
+        let anchor = TooltipAnchorView(text:"볼펜 · P")
+        anchor.frame = NSRect(x:100,y:7,width:44,height:44)
+        window.contentView = anchor
+        window.contentView!.layoutSubtreeIfNeeded()
+        window.makeKeyAndOrderFront(nil)
+        try await Task.sleep(for:.milliseconds(100))
+        window.contentView!.layoutSubtreeIfNeeded()
+        anchor.mouseEntered(with:NSEvent.enterExitEvent(with:.mouseEntered,location:.zero,modifierFlags:[],timestamp:ProcessInfo.processInfo.systemUptime,windowNumber:window.windowNumber,context:nil,eventNumber:0,trackingNumber:0,userData:nil)!)
+        guard let tip = anchor.tooltipWindow, tip.isVisible, tip.ignoresMouseEvents,
+              tip.frame.minY > window.convertToScreen(anchor.convert(anchor.bounds,to:nil)).maxY,
+              window.isKeyWindow else { throw Failure(message:"Tooltip was not above the control or stole focus") }
+        anchor.mouseExited(with:NSEvent.enterExitEvent(with:.mouseExited,location:.zero,modifierFlags:[],timestamp:ProcessInfo.processInfo.systemUptime,windowNumber:window.windowNumber,context:nil,eventNumber:0,trackingNumber:0,userData:nil)!)
+        guard anchor.tooltipWindow == nil else { throw Failure(message:"Tooltip did not dismiss") }
+
     }
 }
