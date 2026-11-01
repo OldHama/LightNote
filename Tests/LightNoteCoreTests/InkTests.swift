@@ -172,3 +172,17 @@ final class InkTests: XCTestCase {
         XCTAssertThrowsError(try NoteFile(strokes: [stroke, stroke]).validate())
     }
 }
+
+
+extension InkTests {
+    func testOptionalObjectLockRoundtripAndLegacyNotes() throws {
+        var stroke = InkStroke(samples:[InkSample(x:10,y:20,time:1)])
+        XCTAssertFalse(stroke.isLocked)
+        let legacy = try NoteFile(strokes:[stroke]).encoded()
+        XCTAssertFalse(try NoteFile.decode(legacy).strokes[0].isLocked)
+        stroke.locked = true
+        let decoded = try NoteFile.decode(NoteFile(strokes:[stroke]).encoded())
+        XCTAssertTrue(decoded.strokes[0].isLocked)
+        XCTAssertEqual(decoded.strokes[0],stroke)
+    }
+}

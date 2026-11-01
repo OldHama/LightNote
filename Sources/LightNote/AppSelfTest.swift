@@ -552,6 +552,32 @@ enum AppSelfTest {
         try expect(diskPNG == exportedPNG,"Exported file differs from PNG clipboard")
         try expect(destinationDoc.state.note == beforePNG && destinationDoc.undoManager?.canUndo == undoBeforePNG && destinationDoc.state.hasSelection,
                    "PNG export changed document/undo/selection")
+        let lockedIDs = Set(exportObjects.map(\.id))
+        let lockBitmap = destinationCanvas.bitmapImageRepForCachingDisplay(in:destinationCanvas.bounds)!
+        destinationCanvas.cacheDisplay(in:destinationCanvas.bounds,to:lockBitmap)
+        guard let lockButton = destinationCanvas.subviews.compactMap({$0 as? NSButton}).first else {
+            throw Failure(message:"Selection lock button missing")
+        }
+        try expect(!lockButton.isHidden,"Selection lock button hidden")
+        destinationDoc.undoManager?.beginUndoGrouping()
+        lockButton.performClick(nil)
+        destinationDoc.undoManager?.endUndoGrouping()
+        let lockedNote = destinationDoc.state.note
+        try expect(lockedNote.strokes.filter{lockedIDs.contains($0.id)}.allSatisfy(\.isLocked),"Lock button did not lock selected objects")
+        destinationDoc.moveStrokes(ids:lockedIDs,by:CGSize(width:40,height:30))
+        destinationDoc.transformStrokes(ids:lockedIDs,using:CGAffineTransform(scaleX:2,y:2))
+        destinationDoc.eraseStrokes(ids:lockedIDs)
+        try expect(destinationDoc.state.note == lockedNote,"Locked objects moved/resized/deleted")
+        let savedLocked = try NoteFile.decode(destinationDoc.data(ofType:"com.lightnote.note"))
+        try expect(savedLocked == lockedNote,"Lock did not survive save")
+        destinationDoc.undoInk(nil)
+        try expect(destinationDoc.state.note == beforePNG,"Lock undo failed")
+        destinationDoc.redoInk(nil)
+        try expect(destinationDoc.state.note == lockedNote,"Lock redo failed")
+        destinationDoc.undoManager?.beginUndoGrouping()
+        lockButton.performClick(nil)
+        destinationDoc.undoManager?.endUndoGrouping()
+        try expect(destinationDoc.state.note == beforePNG,"Unlock button failed")
         destinationDoc.updateChangeCount(.changeCleared); destinationDoc.close()
         canvas.keyDown(with: toolKey("q", code: 12))
         try expect(doc.state.tool == .freeArrow, "Q did not select free arrow")

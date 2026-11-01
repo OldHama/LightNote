@@ -292,6 +292,7 @@ final class NoteDocument: NSDocument {
     }
 
     func eraseStrokes(ids: Set<UUID>, actionName: String = "획 지우기") {
+        let ids = Set(state.note.strokes.filter { ids.contains($0.id) && !$0.isLocked }.map(\.id))
         let removed = state.note.strokes.enumerated().compactMap { index, stroke in
             ids.contains(stroke.id) ? (index, stroke) : nil
         }
@@ -318,7 +319,7 @@ final class NoteDocument: NSDocument {
     func moveStrokes(ids: Set<UUID>, by delta: CGSize) {
         guard delta.width.isFinite, delta.height.isFinite,
               delta.width != 0 || delta.height != 0 else { return }
-        let moved = state.note.strokes.filter { ids.contains($0.id) }.map { stroke in
+        let moved = state.note.strokes.filter { ids.contains($0.id) && !$0.isLocked }.map { stroke in
             var copy = stroke
             for index in copy.samples.indices {
                 copy.samples[index].x += delta.width
@@ -331,7 +332,7 @@ final class NoteDocument: NSDocument {
         replaceStrokes(moved)
     }
     func transformStrokes(ids: Set<UUID>, using transform: CGAffineTransform) {
-        let changed = state.note.strokes.filter { ids.contains($0.id) }.map { stroke in
+        let changed = state.note.strokes.filter { ids.contains($0.id) && !$0.isLocked }.map { stroke in
             var copy = stroke
             for i in copy.samples.indices {
                 let point = copy.samples[i].point.applying(transform)
@@ -341,6 +342,13 @@ final class NoteDocument: NSDocument {
         }
         guard changed.allSatisfy({ $0.samples.allSatisfy { $0.x.isFinite && $0.y.isFinite && abs($0.x) <= 100000 && abs($0.y) <= 100000 } }) else { return }
         replaceStrokes(changed, actionName: "선택 크기 변경")
+    }
+    func setLocked(ids: Set<UUID>, locked: Bool) {
+        let changed = state.note.strokes.filter { ids.contains($0.id) && $0.isLocked != locked }.map { stroke in
+            var copy = stroke; copy.locked = locked ? true : nil; return copy
+        }
+        guard !changed.isEmpty else { return }
+        replaceStrokes(changed, actionName: locked ? "객체 잠금" : "객체 잠금 해제")
     }
     private func replaceStrokes(_ replacements: [InkStroke], actionName: String = "선택 이동") {
         let lookup = Dictionary(uniqueKeysWithValues: replacements.map { ($0.id, $0) })

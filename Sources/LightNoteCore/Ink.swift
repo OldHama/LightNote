@@ -34,6 +34,8 @@ public struct InkStroke: Codable, Equatable, Sendable, Identifiable {
     public var color: InkColor
     public var width: Double
     public var tool: String
+    public var locked: Bool? = nil
+    public var isLocked: Bool { locked == true }
     public var imagePNG: Data? = nil
     public var samples: [InkSample]
     public init(id: UUID = UUID(), color: InkColor = .black, width: Double = 1,

@@ -137,6 +137,40 @@ final class InkCanvasView: NSView {
     private var lastPasteChangeCount: Int?
     private var pasteRepeatCount = 0
     private var selectedIDs = Set<UUID>()
+    private var selectionContainsLocked: Bool {
+        state.note.strokes.contains { selectedIDs.contains($0.id) && $0.isLocked }
+    }
+    private lazy var selectionLockButton: NSButton = {
+        let button = NSButton(title:"",target:self,action:#selector(toggleSelectionLock))
+        button.bezelStyle = .rounded
+        button.imagePosition = .imageOnly
+        button.imageScaling = .scaleProportionallyDown
+        button.setAccessibilityLabel("선택 객체 잠금")
+        return button
+    }()
+    @objc func toggleSelectionLock() {
+        guard !selectedIDs.isEmpty else { return }
+        finishStroke(reason:"selection-lock")
+        let allLocked = state.note.strokes.filter { selectedIDs.contains($0.id) }.allSatisfy(\.isLocked)
+        state.document?.setLocked(ids:selectedIDs,locked:!allLocked)
+        needsDisplay = true
+    }
+    private func updateSelectionLockButton() {
+        let button = selectionLockButton
+        guard state.tool == .selection, marqueeStart == nil, let rect = selectionBounds else {
+            button.isHidden = true; return
+        }
+        if button.superview == nil { addSubview(button) }
+        let scale = enclosingScrollView?.magnification ?? 1
+        let box = NSRect(x:rect.midX-22/scale,y:rect.maxY+6/scale,width:44/scale,height:32/scale)
+        if button.frame != box { button.frame = box }
+        let allLocked = state.note.strokes.filter { selectedIDs.contains($0.id) }.allSatisfy(\.isLocked)
+        button.image = NSImage(systemSymbolName:allLocked ? "lock.fill" : "lock.open",accessibilityDescription:nil)
+        button.image?.size = NSSize(width:16/scale,height:16/scale)
+        button.toolTip = allLocked ? "잠금 해제" : "객체 잠금"
+        button.setAccessibilityLabel(allLocked ? "선택 객체 잠금 해제" : "선택 객체 잠금")
+        button.isHidden = false
+    }
     private var marqueeStart: CGPoint?
     private var marqueeRect: CGRect?
     private var moveStart: CGPoint?
@@ -341,7 +375,7 @@ final class InkCanvasView: NSView {
         }
         if state.tool == .selection {
             let point = convert(event.locationInWindow, from: nil)
-            if let rect = selectionBounds, let corner = handleCorners(rect).first(where: {
+            if !selectionContainsLocked, let rect = selectionBounds, let corner = handleCorners(rect).first(where: {
                 abs($0.x-point.x) <= handleRadius && abs($0.y-point.y) <= handleRadius &&
                 hypot($0.x-point.x, $0.y-point.y) < hypot(rect.midX-point.x, rect.midY-point.y)
             }) {
@@ -349,6 +383,7 @@ final class InkCanvasView: NSView {
                                      y: corner.y == rect.minY ? rect.maxY : rect.minY)
                 resizeDrag = ResizeDrag(source: rect, anchor: anchor, corner: corner, target: corner)
             } else if let rect = selectionBounds, rect.contains(point) {
+                guard !selectionContainsLocked else { return }
                 moveStart = point
                 moveDelta = .zero
             } else {
@@ -783,7 +818,7 @@ final class InkCanvasView: NSView {
         let sweep = CGRect(x: min(previous.x, point.x), y: min(previous.y, point.y),
                            width: abs(point.x - previous.x), height: abs(point.y - previous.y))
             .insetBy(dx: -NoteState.eraserRadius, dy: -NoteState.eraserRadius)
-        for stroke in state.note.strokes where !erasedIDs.contains(stroke.id) {
+        for stroke in state.note.strokes where !erasedIDs.contains(stroke.id) && !stroke.isLocked {
             if let cached = cache[stroke.id], !cached.bounds.intersects(sweep) { continue }
             if stroke.intersectsEraser(from: previous, to: point, radius: NoteState.eraserRadius, polyline: cache[stroke.id]?.points) {
                 erasedIDs.insert(stroke.id)
@@ -832,7 +867,7 @@ final class InkCanvasView: NSView {
                 guard !selectedIDs.isEmpty else { return }
                 finishStroke(reason: "selection-delete")
                 let ids = selectedIDs
-                clearSelection()
+                if !selectionContainsLocked { clearSelection() }
                 state.document?.eraseStrokes(ids: ids)
                 state.document?.undoManager?.setActionName("선택 삭제")
                 return
@@ -896,6 +931,7 @@ final class InkCanvasView: NSView {
     override var undoManager: UndoManager? { state.document?.undoManager }
 
     override func draw(_ dirtyRect: NSRect) {
+        updateSelectionLockButton()
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         let paperColor = state.note.paperStyle == .grid
             ? AppPreferences.shared.paperColor.cgColor
@@ -961,7 +997,7 @@ final class InkCanvasView: NSView {
             context.setLineWidth(1 / scale)
             context.setLineDash(phase: 0, lengths: [5 / scale, 3 / scale])
             context.stroke(rect)
-            if marqueeRect == nil {
+            if marqueeRect == nil && !selectionContainsLocked {
                 context.setLineDash(phase: 0, lengths: [])
                 context.setFillColor(NSColor.white.cgColor)
                 for corner in handleCorners(rect) {
