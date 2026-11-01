@@ -141,6 +141,7 @@ final class InkCanvasView: NSView {
     private var moveStart: CGPoint?
     private var moveDelta = CGSize.zero
     private var active: InkStroke?
+    private var commandPreviousTool: InkTool?
     private var penIsStraight = false
     var displayedStroke: InkStroke? {
         guard let active else { return nil }
@@ -175,7 +176,10 @@ final class InkCanvasView: NSView {
         state.refreshAppearance = { [weak self] in self?.needsDisplay = true }
         state.refreshCursor = { [weak self] in
             guard let self else { return }
-            if self.state.tool != .selection { self.clearSelection() }
+            if self.state.tool != .selection {
+                self.commandPreviousTool = nil
+                self.clearSelection()
+            }
             self.refreshToolCursor()
         }
         state.invalidateStrokeCache = { [weak self] ids in
@@ -265,15 +269,28 @@ final class InkCanvasView: NSView {
     }
     @objc private func windowResigned() {
         finishStroke(reason: "window-inactive")
+        updateCommandSelection(false)
     }
     private var inputInProgress: Bool {
         active != nil || shapeDraft != nil || activeLaser != nil || erasingLast != nil ||
         marqueeStart != nil || moveStart != nil || resizeDrag != nil
     }
-    private func updateCommandSelection(_ held: Bool) {
-        guard held, !inputInProgress, state.tool != .selection else { return }
+    private func updateCommandSelection(_ held: Bool, completed: Bool = false) {
+        guard !inputInProgress else { return }
+        if let previous = commandPreviousTool {
+            guard !held || completed else { return }
+            if state.tool == .selection && selectedIDs.isEmpty {
+                commandPreviousTool = nil
+                state.selectTool(previous)
+            } else if !held {
+                commandPreviousTool = nil
+            }
+            return
+        }
+        guard held, !completed, state.tool != .selection else { return }
         // These tools already use Command for constrained shapes.
         guard state.tool != .ellipse, state.tool != .rectangle, state.tool != .arrow else { return }
+        commandPreviousTool = state.tool
         state.selectTool(.selection)
     }
     override func viewDidChangeBackingProperties() {
@@ -357,7 +374,7 @@ final class InkCanvasView: NSView {
         append(event)
     }
     override func mouseUp(with event: NSEvent) {
-        defer { updateCommandSelection(event.modifierFlags.contains(.command)) }
+        defer { updateCommandSelection(event.modifierFlags.contains(.command), completed: true) }
         if shapeDraft != nil {
             updateShape(with: event)
             finishStroke(reason: "shape-up")
