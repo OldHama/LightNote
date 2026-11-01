@@ -313,7 +313,7 @@ enum AppSelfTest {
         try expect(canvas.visibleLaserTraceCount == 2, "Previous laser faded during new hold")
         try expect(canvas.laserIsFullyVisible, "Re-click did not restore full laser brightness")
         canvas.mouseUp(with: event(.leftMouseUp, 360, 560, 705))
-        canvas.advanceLaser(now: ProcessInfo.processInfo.systemUptime + 2.1, leftButtonDown: false)
+        canvas.advanceLaser(now: ProcessInfo.processInfo.systemUptime + 1.4, leftButtonDown: false)
         try expect(canvas.visibleLaserTraceCount == 0, "Released laser did not expire")
         try expect(doc.state.note == beforeLaser && doc.undoManager?.canUndo == undoBeforeLaser,
                    "Laser changed ink or undo history")

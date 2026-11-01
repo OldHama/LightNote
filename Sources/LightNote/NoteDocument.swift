@@ -56,7 +56,7 @@ enum InkTool {
         case .arrow: "드래그한 방향으로 화살표 그리기"
         case .freeArrow: "펜처럼 그리고 끝에 화살촉 붙이기"
         case .ellipse, .rectangle: "드래그하여 그리기 · ⌘ 정원 / 정사각형"
-        case .laser: "다시 누르면 진하게 복원 · 떼면 2초간 서서히 사라짐"
+        case .laser: "다시 누르면 진하게 복원 · 떼면 1.3초간 서서히 사라짐"
         }
     }
 }
