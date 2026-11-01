@@ -113,7 +113,7 @@ struct DrawingToolStrip: View {
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DrawingToolButtonStyle(tint: value == .laser ? .red : .accentColor))
         .help(help)
         .accessibilityLabel(value.title)
     }
@@ -127,6 +127,32 @@ struct DrawingToolStrip: View {
             tool(.rectangle, help: "사각형 · R · ⌘ 정사각형")
             tool(.freeArrow, help: "자유 화살표 · Q")
             tool(.arrow, help: "화살표 · A")
+        }
+    }
+}
+
+/// Keep the complete 44-point hit target; inset only the visual highlight.
+private struct DrawingToolButtonStyle: ButtonStyle {
+    let tint: Color
+    func makeBody(configuration: Configuration) -> some View {
+        HoverLabel(configuration: configuration, tint: tint)
+    }
+    private struct HoverLabel: View {
+        let configuration: ButtonStyle.Configuration
+        let tint: Color
+        @State private var hovering = false
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        var body: some View {
+            configuration.label
+                .background {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(tint.opacity(configuration.isPressed ? 0.24 : (hovering ? 0.13 : 0)))
+                        .padding(3)
+                }
+                .contentShape(Rectangle())
+                .onHover { hovering = $0 }
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovering)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: configuration.isPressed)
         }
     }
 }
