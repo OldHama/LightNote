@@ -141,7 +141,6 @@ final class InkCanvasView: NSView {
     private var moveStart: CGPoint?
     private var moveDelta = CGSize.zero
     private var active: InkStroke?
-    private var commandPreviousTool: InkTool?
     private var penIsStraight = false
     var displayedStroke: InkStroke? {
         guard let active else { return nil }
@@ -266,29 +265,16 @@ final class InkCanvasView: NSView {
     }
     @objc private func windowResigned() {
         finishStroke(reason: "window-inactive")
-        updateCommandSelection(false)
     }
     private var inputInProgress: Bool {
         active != nil || shapeDraft != nil || activeLaser != nil || erasingLast != nil ||
         marqueeStart != nil || moveStart != nil || resizeDrag != nil
     }
     private func updateCommandSelection(_ held: Bool) {
-        guard !inputInProgress else { return }
-        if held {
-            guard commandPreviousTool == nil, state.tool != .selection else { return }
-            // These tools already use Command for constrained shapes.
-            guard state.tool != .ellipse, state.tool != .rectangle, state.tool != .arrow else { return }
-            commandPreviousTool = state.tool
-            state.selectTool(.selection)
-        } else if let previous = commandPreviousTool {
-            commandPreviousTool = nil
-            // A deliberate tool change (for example paste) takes precedence.
-            if state.tool == .selection {
-                state.tool = previous
-                refreshToolCursor()
-                needsDisplay = true
-            }
-        }
+        guard held, !inputInProgress, state.tool != .selection else { return }
+        // These tools already use Command for constrained shapes.
+        guard state.tool != .ellipse, state.tool != .rectangle, state.tool != .arrow else { return }
+        state.selectTool(.selection)
     }
     override func viewDidChangeBackingProperties() {
         finishStroke(reason: "display-change")
