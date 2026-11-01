@@ -70,6 +70,10 @@ final class InkScrollView: NSScrollView {
             width: max(size.width / zoom, visible.maxX),
             height: max(size.height / zoom, visible.maxY)))
     }
+    override func reflectScrolledClipView(_ clipView: NSClipView) {
+        super.reflectScrolledClipView(clipView)
+        (documentView as? InkCanvasView)?.updateVisiblePage()
+    }
     override func magnify(with event: NSEvent) {
         // A transform must not join input samples from different coordinate mappings.
         state?.finishInput?()
@@ -283,15 +287,21 @@ final class InkCanvasView: NSView {
     /// The viewport is always writable; enlarging the workspace never scales stored ink.
     func expandWorkspace(to minimum: NSSize) {
         let size = NSSize(width: max(frame.width, ceil(minimum.width)),
-                          height: max(frame.height, ceil(minimum.height)))
-        guard size != frame.size else { return }
-        setFrameSize(size)
-        needsDisplay = true
+                          height: max(frame.height, ceil(max(1, minimum.height) / state.note.pageHeight) * state.note.pageHeight))
+        if size != frame.size { setFrameSize(size); needsDisplay = true }
+        updateVisiblePage()
+    }
+    func updateVisiblePage() {
+        let count = max(1, Int(ceil(frame.height / state.note.pageHeight)))
+        let current = min(count, max(1, Int(max(0, visibleRect.minY + 1) / state.note.pageHeight) + 1))
+        if state.workspacePageCount != count { state.workspacePageCount = count }
+        if state.visiblePage != current { state.visiblePage = current }
     }
     private func expandWorkspaceToStoredInk() {
-        var extent = CGRect(x: 0, y: 0, width: state.note.pageWidth, height: state.note.pageHeight)
+        var extent = CGRect.null
         for stroke in state.note.strokes { extent = extent.union(stroke.bounds) }
-        expandWorkspace(to: NSSize(width: extent.maxX + 24, height: extent.maxY + 24))
+        expandWorkspace(to: NSSize(width:max(state.note.pageWidth, extent.isNull ? 0 : extent.maxX+24),
+                                  height:max(state.note.pageHeight, extent.isNull ? 0 : extent.maxY)))
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
     @objc private func appResigned() { finishStroke(reason: "app-inactive") }
@@ -793,7 +803,7 @@ final class InkCanvasView: NSView {
         let previousHead = active?.freeArrowHeadBounds ?? .null
         let previous = active?.samples.last?.point
         active?.samples.append(sample)
-        if point.x >= bounds.maxX || point.y >= bounds.maxY {
+        if point.x >= bounds.maxX || point.y + (active?.width ?? 1)/2 >= bounds.maxY {
             expandWorkspace(to: NSSize(width: point.x + 128, height: point.y + 128))
         }
         let changedStart = liveInk.path.currentPoint
@@ -942,6 +952,7 @@ final class InkCanvasView: NSView {
         if state.note.paperStyle == .grid {
             drawGrid(in: dirtyRect, context: context)
         }
+        drawPageBoundaries(in:dirtyRect,context:context)
         context.setAllowsAntialiasing(true)
         context.setShouldAntialias(true)
         for stroke in state.note.strokes where !erasedIDs.contains(stroke.id) {
@@ -1014,6 +1025,25 @@ final class InkCanvasView: NSView {
             drawLaser(trace.path, tail: nil, opacity: trace.opacity * LaserTiming.opacity(releasedAt: trace.releasedAt, now: now), context: context)
         }
         if let activeLaser { drawLaser(activeLaser.path, tail: activeLaser.lastPoint, opacity: 1, context: context) }
+    }
+    /// Page guides do not alter ink coordinates and are excluded from PNG exports.
+    private func drawPageBoundaries(in dirtyRect: CGRect, context: CGContext) {
+        let height = CGFloat(state.note.pageHeight)
+        let scale = enclosingScrollView?.magnification ?? 1
+        let first = max(1, Int(floor(max(0,dirtyRect.minY)/height)))
+        let last = min(state.workspacePageCount-1, Int(ceil(dirtyRect.maxY/height)))
+        guard first <= last else { return }
+        context.saveGState()
+        defer { context.restoreGState() }
+        for page in first...last {
+            let y = CGFloat(page)*height
+            context.setFillColor(NSColor(srgbRed:0.75,green:0.81,blue:0.89,alpha:1).cgColor)
+            context.fill(CGRect(x:dirtyRect.minX,y:y-1/scale,width:dirtyRect.width,height:2/scale))
+            let label = "\(page+1) 페이지" as NSString
+            label.draw(at:CGPoint(x:max(12,visibleRect.minX+12/scale),y:y+8/scale),withAttributes:[
+                .font:NSFont.systemFont(ofSize:11/scale,weight:.medium),
+                .foregroundColor:NSColor(srgbRed:0.29,green:0.36,blue:0.47,alpha:1)])
+        }
     }
     /// Grid coordinates are anchored to the paper, so scrolling and partial redraws agree.
     private func drawGrid(in dirtyRect: CGRect, context: CGContext) {

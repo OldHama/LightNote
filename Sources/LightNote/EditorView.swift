@@ -91,7 +91,7 @@ struct EditorView: View {
                 Text("·").foregroundStyle(.tertiary)
                 Text("\(state.strokeCount)개 획")
                 Text("·").foregroundStyle(.tertiary)
-                Text(state.note.paperStyle == .grid ? "모눈 · 확장 캔버스" : "무지 · 확장 캔버스")
+                Text("\(state.visiblePage) / \(state.workspacePageCount) 페이지 · " + (state.note.paperStyle == .grid ? "모눈" : "무지"))
             }.font(.system(size: 11)).foregroundStyle(.secondary)
                 .padding(.horizontal, 18).frame(height: 30).background(.bar)
         }

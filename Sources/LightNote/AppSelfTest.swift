@@ -737,6 +737,39 @@ enum AppSelfTest {
         canvas.mouseUp(with:event(.leftMouseUp,3120,1820,1312)); end()
         try expect(doc.state.note.strokes.last!.samples.last!.point == CGPoint(x:3120,y:1820),
                    "Tablet filtering truncated an ordinary mouse endpoint")
+        let pageDoc = NoteDocument()
+        let pageCanvas = InkCanvasView(state:pageDoc.state)
+        pageDoc.undoManager?.groupsByEvent = false
+        let pageHeight = pageDoc.state.note.pageHeight
+        try expect(pageCanvas.frame.height == pageHeight && pageDoc.state.workspacePageCount == 1,"Blank note created extra page")
+        func pageEvent(_ type:NSEvent.EventType,_ y:Double,_ time:Double) -> NSEvent {
+            NSEvent.mouseEvent(with:type,location:pageCanvas.convert(CGPoint(x:100,y:y),to:nil),modifierFlags:[],timestamp:time,windowNumber:0,
+                context:nil,eventNumber:0,clickCount:1,pressure:0)!
+        }
+        pageDoc.undoManager?.beginUndoGrouping()
+        pageCanvas.mouseDown(with:pageEvent(.leftMouseDown,pageHeight-20,1500))
+        pageCanvas.mouseDragged(with:pageEvent(.leftMouseDragged,pageHeight+20,1501))
+        pageCanvas.mouseUp(with:pageEvent(.leftMouseUp,pageHeight+40,1502))
+        pageDoc.undoManager?.endUndoGrouping()
+        try expect(pageDoc.state.workspacePageCount == 2 && pageCanvas.frame.height == pageHeight*2,"Crossing lower boundary did not append a full page")
+        try expect(pageDoc.state.note.strokes.count == 1 && pageDoc.state.note.strokes[0].samples.count == 3,"Page boundary split a stroke")
+        let guideRect = CGRect(x:0,y:pageHeight-30,width:300,height:100)
+        let guideBitmap = pageCanvas.bitmapImageRepForCachingDisplay(in:guideRect)!
+        pageCanvas.cacheDisplay(in:guideRect,to:guideBitmap)
+        try guideBitmap.representation(using:.png,properties:[:])!.write(to:URL(fileURLWithPath:"/tmp/lightnote-pages-preview.png"))
+        let pagesSaved = try pageDoc.data(ofType:"com.lightnote.note")
+        let reopenedPages = NoteDocument()
+        try reopenedPages.read(from:pagesSaved,ofType:"com.lightnote.note")
+        let reopenedCanvas = InkCanvasView(state:reopenedPages.state)
+        try expect(reopenedCanvas.frame.height == pageHeight*2 && reopenedPages.state.note == pageDoc.state.note,"Pages/ink did not survive reopening")
+        let nearBoundaryDoc = NoteDocument()
+        let nearBoundaryNote = NoteFile(strokes:[InkStroke(samples:[InkSample(x:100,y:pageHeight-10,time:1)])])
+        try nearBoundaryDoc.read(from:nearBoundaryNote.encoded(),ofType:"com.lightnote.note")
+        let nearBoundaryCanvas = InkCanvasView(state:nearBoundaryDoc.state)
+        try expect(nearBoundaryCanvas.frame.height == pageHeight,"Reopening near the boundary added a spurious page")
+        nearBoundaryDoc.updateChangeCount(.changeCleared); nearBoundaryDoc.close()
+        pageDoc.updateChangeCount(.changeCleared); pageDoc.close()
+        reopenedPages.updateChangeCount(.changeCleared); reopenedPages.close()
         print("Verified: Shift pen line/press/release/mid-stroke/undo/redo/save; Q free-arrow drawing/head-selection/delete/undo/redo/save; 100 taps; 2002-sample stroke; mid-stroke save continuity; style; undo/redo; interruption; dot pixels; grid pixels/style undo/redo; stroke eraser click/sweep/undo/redo/keys; rectangle selection/move/undo/redo/save; zoom transforms/ink/eraser/reset; outer viewport grid/input/reopen; shapes/command circle/corner resize/undo/redo; laser hold/release/expiry/non-persistence; managed note automatic save/reopen; disk roundtrip; corrupt read")
         doc.updateChangeCount(.changeCleared)
         doc.close()
