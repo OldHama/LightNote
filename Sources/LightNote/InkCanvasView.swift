@@ -270,10 +270,19 @@ final class InkCanvasView: NSView {
         needsDisplay = true
     }
 
+    private func focusForDrawing() {
+        guard let window else { return }
+        // acceptsFirstMouse permits background ink input but does not activate the app.
+        // Activate and select this document before assigning its keyboard responder.
+        if !NSApp.isActive { NSApp.activate(ignoringOtherApps: true) }
+        if !window.isKeyWindow { window.makeKeyAndOrderFront(nil) }
+        if !window.isMainWindow { window.makeMain() }
+        if window.firstResponder !== self { window.makeFirstResponder(self) }
+    }
     override func mouseDown(with event: NSEvent) {
-        finishStroke(reason: "new-down")
-        window?.makeFirstResponder(self)
         guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        focusForDrawing()
+        finishStroke(reason: "new-down")
         if state.tool == .ellipse || state.tool == .rectangle || state.tool == .arrow {
             let point = convert(event.locationInWindow, from: nil)
             shapeDraft = ShapeDraft(kind: state.tool == .ellipse ? .ellipse : (state.tool == .arrow ? .arrow : .rectangle),

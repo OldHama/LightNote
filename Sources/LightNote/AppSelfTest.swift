@@ -1034,3 +1034,66 @@ extension AppSelfTest {
         throw Failure(message:"Subprocess was not killed")
     }
 }
+
+
+extension AppSelfTest {
+    static func testDrawingFocus(returnTo original: NSRunningApplication?) async throws {
+        func waitFor(_ predicate: () -> Bool) async throws {
+            for _ in 0..<500 {
+                if predicate() { return }
+                try await Task.sleep(for:.milliseconds(10))
+            }
+            throw Failure(message:"Focus transition timed out")
+        }
+        let oldDelay = NSDocumentController.shared.autosavingDelay
+        NSDocumentController.shared.autosavingDelay = 60
+        defer { NSDocumentController.shared.autosavingDelay = oldDelay }
+        let doc = NoteDocument()
+        NSDocumentController.shared.addDocument(doc)
+        doc.makeWindowControllers()
+        let window=doc.windowControllers[0].window!
+        let canvas=InkCanvasView(state:doc.state)
+        window.contentView=canvas
+        doc.undoManager?.groupsByEvent=false
+        let other=NSWindow(contentRect:NSRect(x:100,y:100,width:300,height:200),styleMask:[.titled,.closable],backing:.buffered,defer:false)
+        other.isReleasedWhenClosed=false
+        let field=NSTextField(frame:NSRect(x:20,y:20,width:200,height:30))
+        other.contentView!.addSubview(field)
+        defer {
+            doc.updateChangeCount(.changeCleared); doc.close(); other.close()
+            if let original, original.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+                NSApp.yieldActivation(to: original)
+                original.activate(options: [])
+            }
+        }
+        func event(_ type: NSEvent.EventType,_ point:CGPoint,_ time:Double) -> NSEvent {
+            NSEvent.mouseEvent(with:type,location:canvas.convert(point,to:nil),modifierFlags:[],timestamp:time,windowNumber:window.windowNumber,context:nil,eventNumber:0,clickCount:1,pressure:0)!
+        }
+        window.makeKeyAndOrderFront(nil)
+        other.makeKeyAndOrderFront(nil); other.makeFirstResponder(field)
+        try await waitFor { other.isKeyWindow }
+        guard !window.isKeyWindow else { throw Failure(message:"Focus fixture did not switch windows") }
+        doc.undoManager?.beginUndoGrouping()
+        canvas.mouseDown(with:event(.leftMouseDown,CGPoint(x:30,y:30),1))
+        guard window.isKeyWindow, window.isMainWindow, window.firstResponder === canvas else { throw Failure(message:"Drawing did not focus owning document") }
+        canvas.mouseDragged(with:event(.leftMouseDragged,CGPoint(x:60,y:60),2))
+        canvas.mouseUp(with:event(.leftMouseUp,CGPoint(x:90,y:50),3))
+        doc.undoManager?.endUndoGrouping()
+        guard doc.state.note.strokes.count == 1, doc.state.note.strokes[0].samples.first!.point == CGPoint(x:30,y:30) else { throw Failure(message:"First click was lost on window switch") }
+        guard let finder=NSRunningApplication.runningApplications(withBundleIdentifier:"com.apple.finder").first else { throw Failure(message:"Finder not running for cross-app activation test") }
+        finder.activate(options: [])
+        try await waitFor { NSWorkspace.shared.frontmostApplication?.processIdentifier == finder.processIdentifier && !NSApp.isActive }
+        doc.undoManager?.beginUndoGrouping()
+        canvas.mouseDown(with:event(.leftMouseDown,CGPoint(x:100,y:100),4))
+        try await waitFor { NSApp.isActive && NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier && window.isKeyWindow && window.firstResponder === canvas }
+        canvas.mouseDragged(with:event(.leftMouseDragged,CGPoint(x:130,y:110),5))
+        canvas.mouseUp(with:event(.leftMouseUp,CGPoint(x:160,y:120),6))
+        doc.undoManager?.endUndoGrouping()
+        guard window.isMainWindow, doc.state.note.strokes.count == 2,
+              doc.state.note.strokes.last!.samples.first!.point == CGPoint(x:100,y:100),
+              doc.state.note.strokes.last!.samples.last!.point == CGPoint(x:160,y:120) else { throw Failure(message:"First cross-app stroke was interrupted") }
+        let key=NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:[],timestamp:7,windowNumber:window.windowNumber,context:nil,characters:"e",charactersIgnoringModifiers:"e",isARepeat:false,keyCode:14)!
+        NSApp.sendEvent(key)
+        guard doc.state.tool == .eraser, window.firstResponder === canvas else { throw Failure(message:"Canvas shortcuts did not follow focus") }
+    }
+}

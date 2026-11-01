@@ -18,8 +18,10 @@ struct LightNoteMain {
             arguments["ApplePersistenceIgnoreState"] = true
             UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         }
+        let focusReturnApp = CommandLine.arguments.contains("--focus-self-test") ? NSWorkspace.shared.frontmostApplication : nil
         let application = NSApplication.shared
         let delegate = AppDelegate()
+        delegate.focusTestReturnApplication = focusReturnApp
         application.delegate = delegate
         application.setActivationPolicy(.regular)
         application.run()
@@ -32,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     private lazy var updaterController = SPUStandardUpdaterController(
         startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
     private var preferencesController: NSWindowController?
+    var focusTestReturnApplication: NSRunningApplication?
     private(set) var terminationPending = false
     private var updateSavePending = false
     private var postponedUpdate: (() -> Void)?
@@ -60,6 +63,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
             Task { @MainActor in
                 do { try await AppSelfTest.runRecoveryProcess() }
                 catch { fputs("RECOVERY_PROCESS_FAILED: \(error)\n", stderr); exit(1) }
+            }
+            return
+        }
+        if CommandLine.arguments.contains("--focus-self-test") {
+            Task { @MainActor in
+                do { try await AppSelfTest.testDrawingFocus(returnTo: focusTestReturnApplication); print("DRAWING_FOCUS_TEST_PASSED"); exit(0) }
+                catch { fputs("DRAWING_FOCUS_TEST_FAILED: \(error)\n", stderr); exit(1) }
             }
             return
         }
