@@ -23,7 +23,7 @@ struct EditorView: View {
                         .topTooltip("새 노트 · ⌘N").accessibilityLabel("새 노트")
                     Button { NSDocumentController.shared.openDocument(nil) } label: { Image(systemName: "folder") }
                         .topTooltip("열기 · ⌘O").accessibilityLabel("열기")
-                    Button { state.finishInput?(); state.document?.save(nil) } label: { Image(systemName: "square.and.arrow.down") }
+                    Button { state.finishInput?(); state.document?.save(nil) } label: { FloppyDiskIcon() }
                         .topTooltip("저장 · ⌘S").accessibilityLabel("저장")
                     Button { state.showShortcuts = true } label: {
                         Image(systemName: "questionmark.circle")
@@ -97,6 +97,33 @@ struct EditorView: View {
         }
         .frame(minWidth: 740, minHeight: 440)
         .sheet(isPresented: $state.showShortcuts) { ShortcutHelpView() }
+    }
+}
+
+/// Classic floppy disk, drawn as a vector for crisp light/dark appearance.
+private struct FloppyDiskIcon: View {
+    var body: some View {
+        Path { path in
+            path.move(to: CGPoint(x: 1.5, y: 1.5))
+            path.addLine(to: CGPoint(x: 13.5, y: 1.5))
+            path.addLine(to: CGPoint(x: 16.5, y: 4.5))
+            path.addLine(to: CGPoint(x: 16.5, y: 16.5))
+            path.addLine(to: CGPoint(x: 1.5, y: 16.5))
+            path.closeSubpath()
+            path.move(to: CGPoint(x: 4.5, y: 1.5))
+            path.addLine(to: CGPoint(x: 4.5, y: 6.5))
+            path.addLine(to: CGPoint(x: 12.5, y: 6.5))
+            path.addLine(to: CGPoint(x: 12.5, y: 1.5))
+            path.move(to: CGPoint(x: 4.5, y: 16.5))
+            path.addLine(to: CGPoint(x: 4.5, y: 10))
+            path.addLine(to: CGPoint(x: 13.5, y: 10))
+            path.addLine(to: CGPoint(x: 13.5, y: 16.5))
+            path.move(to: CGPoint(x: 10, y: 3.2))
+            path.addLine(to: CGPoint(x: 10, y: 4.8))
+        }
+        .stroke(style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+        .frame(width: 18, height: 18)
+        .accessibilityHidden(true)
     }
 }
 
