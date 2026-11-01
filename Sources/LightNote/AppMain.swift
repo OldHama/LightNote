@@ -311,7 +311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         item(edit, "잘라내기", #selector(NSText.cut(_:)), "x")
         item(edit, "복사", #selector(copyDocumentSelection(_:)), "c")
         edit.items.last?.target = self
-        item(edit, "선택 영역 PNG 복사", #selector(copySelectionPNG(_:)), "c", modifiers: [.command, .shift])
+        item(edit, "선택 영역 PNG 복사", #selector(copySelectionPNG(_:)), "c", modifiers: [.control, .command])
         edit.items.last?.target = self
         item(edit, "선택 영역 PNG 내보내기…", #selector(exportSelectionPNG(_:)), "e", modifiers: [.command, .shift])
         edit.items.last?.target = self
