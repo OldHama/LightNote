@@ -1190,5 +1190,23 @@ extension AppSelfTest {
                 guard state.tool == tool else { throw Failure(message:"Toolbar padding did not activate \(tool.title), offset=\(offset)") }
             }
         }
+        window.setContentSize(NSSize(width:440,height:58))
+        window.contentView = NSHostingView(rootView:ColorPresetStrip(state:state).frame(width:440,height:58))
+        try await Task.sleep(for:.milliseconds(100))
+        window.contentView!.layoutSubtreeIfNeeded()
+        for (index,preset) in AppPreferences.shared.colorPresets.enumerated() {
+            for offset in [CGPoint(x:2,y:9),CGPoint(x:42,y:49)] {
+                state.color = preset.color == .black ? .red : .black
+                let point = CGPoint(x:CGFloat(index)*44+offset.x,y:offset.y)
+                let time = ProcessInfo.processInfo.systemUptime
+                let down=NSEvent.mouseEvent(with:.leftMouseDown,location:point,modifierFlags:[],timestamp:time,windowNumber:window.windowNumber,context:nil,eventNumber:0,clickCount:1,pressure:1)!
+                let up=NSEvent.mouseEvent(with:.leftMouseUp,location:point,modifierFlags:[],timestamp:time+0.01,windowNumber:window.windowNumber,context:nil,eventNumber:1,clickCount:1,pressure:0)!
+                NSApp.postEvent(up,atStart:true)
+                NSApp.sendEvent(down)
+                try await Task.sleep(for:.milliseconds(30))
+                guard state.color == preset.color else { throw Failure(message:"Color padding did not activate \(preset.name), offset=\(offset)") }
+            }
+        }
+
     }
 }

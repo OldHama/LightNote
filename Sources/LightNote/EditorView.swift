@@ -35,14 +35,7 @@ struct EditorView: View {
                         .disabled(!state.canRedo).help("다시 실행 · ⌘⇧Z").accessibilityLabel("다시 실행")
                     Divider().frame(height: 22)
                     DrawingToolStrip(state: state)
-                    ForEach(preferences.colorPresets, id: \.key) { preset in
-                        Button { state.color = preset.color } label: {
-                            Circle().fill(Color(cgColor: preset.color.cgColor)).frame(width: 19, height: 19)
-                                .padding(4)
-                                .overlay(Circle().stroke(state.color == preset.color ? Color.accentColor : .clear, lineWidth: 2))
-                        }
-                        .buttonStyle(.plain).help(preset.name + " · " + preset.key).accessibilityLabel(preset.name + " 펜")
-                    }
+                    ColorPresetStrip(state: state)
                     ColorPicker("색상", selection: Binding(get: { Color(cgColor: state.color.cgColor) }, set: {
                         guard let c = NSColor($0).usingColorSpace(.sRGB) else { return }
                         state.color = InkColor(c.redComponent, c.greenComponent, c.blueComponent)
@@ -127,6 +120,29 @@ struct DrawingToolStrip: View {
             tool(.rectangle, help: "사각형 · R · ⌘ 정사각형")
             tool(.freeArrow, help: "자유 화살표 · Q")
             tool(.arrow, help: "화살표 · A")
+        }
+    }
+}
+
+/// Color swatches share the drawing tools' full-size targets and hover feedback.
+struct ColorPresetStrip: View {
+    @ObservedObject var state: NoteState
+    @ObservedObject private var preferences = AppPreferences.shared
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(preferences.colorPresets, id: \.key) { preset in
+                Button { state.color = preset.color } label: {
+                    Circle().fill(Color(cgColor: preset.color.cgColor))
+                        .frame(width: 19, height: 19)
+                        .padding(4)
+                        .overlay(Circle().stroke(state.color == preset.color ? Color.accentColor : .clear, lineWidth: 2))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(DrawingToolButtonStyle(tint: .accentColor))
+                .help(preset.name + " · " + preset.key)
+                .accessibilityLabel(preset.name + " 펜")
+            }
         }
     }
 }
