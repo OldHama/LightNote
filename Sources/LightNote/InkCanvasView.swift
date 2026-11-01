@@ -210,6 +210,8 @@ final class InkCanvasView: NSView {
         self.state = state
         super.init(frame: CGRect(x: 0, y: 0, width: state.note.pageWidth, height: state.note.pageHeight))
         expandWorkspaceToStoredInk()
+        state.stickerSelectionPNG = { [weak self] in try self?.selectionPNG() }
+        state.insertSticker = { [weak self] data in self?.insertSticker(data) ?? false }
         state.copySelectionPNG = { [weak self] in self?.performPNGAction(export: false) }
         state.exportSelectionPNG = { [weak self] in self?.performPNGAction(export: true) }
         state.copyInk = { [weak self] in self?.copySelection() }
@@ -566,6 +568,20 @@ final class InkCanvasView: NSView {
         if lastPasteChangeCount == board.changeCount { pasteRepeatCount += 1 }
         else { lastPasteChangeCount = board.changeCount; pasteRepeatCount = 1 }
         return insertCopies(file.strokes, offsetIndex: pasteRepeatCount, actionName: "붙여넣기")
+    }
+    @discardableResult
+    func insertSticker(_ data: Data) -> Bool {
+        guard data.count <= 50_000_000, let bitmap = NSBitmapImageRep(data:data),
+              bitmap.size.width > 0, bitmap.size.height > 0 else { return false }
+        let viewport = visibleRect.isEmpty ? bounds : visibleRect
+        let ratio = min(1, 220/bitmap.size.width, 220/bitmap.size.height,
+                        viewport.width*0.6/bitmap.size.width, viewport.height*0.6/bitmap.size.height)
+        let width = max(1,bitmap.size.width*ratio), height = max(1,bitmap.size.height*ratio)
+        var object = InkStroke(samples:[
+            InkSample(x:viewport.midX-width/2,y:viewport.midY-height/2,time:0),
+            InkSample(x:viewport.midX+width/2,y:viewport.midY+height/2,time:0)])
+        object.tool = "image"; object.imagePNG = data
+        return insertCopies([object],offsetIndex:0,actionName:"스티커 삽입")
     }
     @discardableResult
     func duplicateSelection() -> Bool {

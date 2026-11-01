@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 struct EditorView: View {
     @ObservedObject var state: NoteState
@@ -35,6 +36,8 @@ struct EditorView: View {
                         .disabled(!state.canRedo).topTooltip("다시 실행 · ⌘⇧Z").accessibilityLabel("다시 실행")
                     Divider().frame(height: 22)
                     DrawingToolStrip(state: state)
+                    Button { state.showStickers = true } label: { Label("스티커",systemImage:"face.smiling") }
+                        .topTooltip("등록한 스티커 사용").accessibilityLabel("스티커함")
                     Button { state.copySelectionPNG?() } label: { Image(systemName: "photo.on.rectangle") }
                         .disabled(!state.hasSelection).topTooltip("선택 영역 PNG 복사 · ⌃⌘C").accessibilityLabel("선택 영역 PNG 복사")
                     Button { state.exportSelectionPNG?() } label: { Image(systemName: "square.and.arrow.up") }
@@ -97,6 +100,7 @@ struct EditorView: View {
         }
         .frame(minWidth: 740, minHeight: 440)
         .sheet(isPresented: $state.showShortcuts) { ShortcutHelpView() }
+        .sheet(isPresented: $state.showStickers) { StickerLibraryView(state:state) }
     }
 }
 
@@ -220,11 +224,13 @@ final class TooltipAnchorView: NSView {
     var text: String { didSet { if oldValue != text { hideTooltip() } } }
     private(set) var tooltipWindow: NSPanel?
     private var area: NSTrackingArea?
+    private var trackedRegion = CGRect.null
     init(text: String) { self.text = text; super.init(frame: .zero) }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func updateTrackingAreas() {
-        hideTooltip()
+        let region = convert(visibleRect,to:nil)
+        if region != trackedRegion { hideTooltip(); trackedRegion = region }
         if let area { removeTrackingArea(area) }
         let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
         addTrackingArea(area); self.area = area
@@ -274,6 +280,119 @@ final class TooltipAnchorView: NSView {
         guard let panel = tooltipWindow else { return }
         panel.parent?.removeChildWindow(panel)
         panel.orderOut(nil); panel.close(); tooltipWindow = nil
+    }
+}
+
+private struct StickerActionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Label(configuration:configuration)
+    }
+    private struct Label: View {
+        let configuration: ButtonStyle.Configuration
+        @Environment(\.isEnabled) private var enabled
+        var body: some View {
+            configuration.label.font(.system(size:13,weight:.medium))
+                .foregroundStyle(enabled ? Color.primary : Color.secondary)
+                .padding(.horizontal,12).padding(.vertical,8)
+                .background(configuration.isPressed ? Color.accentColor.opacity(0.25) : Color(nsColor:.controlBackgroundColor),in:RoundedRectangle(cornerRadius:7))
+                .overlay(RoundedRectangle(cornerRadius:7).strokeBorder(Color.primary.opacity(0.15)))
+                .opacity(enabled ? 1 : 0.45)
+        }
+    }
+}
+
+struct StickerLibraryView: View {
+    @ObservedObject var state: NoteState
+    @ObservedObject var library = StickerLibrary.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var errorMessage: String?
+    private func attempt(_ operation: () throws -> Void) {
+        do { try operation() } catch { errorMessage = error.localizedDescription }
+    }
+    private func importImages() {
+        let panel = NSOpenPanel()
+        panel.title = "스티커 이미지 등록"
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.begin { response in
+            guard response == .OK else { return }
+            for url in panel.urls { attempt { try library.importImage(at:url) } }
+        }
+    }
+    var body: some View {
+        VStack(spacing:0) {
+            HStack {
+                Label("스티커",systemImage:"face.smiling").font(.title2.bold())
+                Text("\(library.stickers.count)개").foregroundStyle(.secondary)
+                Spacer()
+                Button { dismiss() } label: { Image(systemName:"xmark") }
+                    .buttonStyle(.plain).keyboardShortcut(.cancelAction).accessibilityLabel("스티커함 닫기")
+            }.padding(20)
+            HStack {
+                Button("이미지 등록…",action:importImages)
+                Button("클립보드 등록") {
+                    attempt {
+                        guard let data = NSPasteboard.general.data(forType:.png) ?? NSPasteboard.general.data(forType:.tiff) ?? NSImage(pasteboard:.general)?.tiffRepresentation else {
+                            throw NSError(domain:"LightNote.Stickers",code:6,userInfo:[NSLocalizedDescriptionKey:"클립보드에 이미지가 없습니다."])
+                        }
+                        try library.add(data:data,name:"클립보드")
+                    }
+                }
+                Button("선택 영역 등록") {
+                    attempt {
+                        guard let data = try state.stickerSelectionPNG?() else { return }
+                        try library.add(data:data,name:"선택 영역")
+                    }
+                }.disabled(!state.hasSelection)
+                Spacer()
+            }.buttonStyle(StickerActionButtonStyle()).padding(.horizontal,20).padding(.bottom,16)
+            Divider()
+            if library.stickers.isEmpty {
+                ContentUnavailableView("등록한 스티커가 없습니다",systemImage:"photo.on.rectangle",
+                    description:Text("이미지나 클립보드를 등록해 사용하세요."))
+                    .frame(maxWidth:.infinity,maxHeight:.infinity)
+            } else {
+                ScrollView {
+                    LazyVGrid(columns:[GridItem(.adaptive(minimum:110),spacing:12)],spacing:12) {
+                        ForEach(library.stickers) { sticker in
+                            Button {
+                                attempt {
+                                    let data = try library.data(for:sticker)
+                                    guard state.insertSticker?(data) == true else {
+                                        throw NSError(domain:"LightNote.Stickers",code:7,userInfo:[NSLocalizedDescriptionKey:"스티커를 노트에 넣지 못했습니다."])
+                                    }
+                                    dismiss()
+                                }
+                            } label: {
+                                VStack(spacing:8) {
+                                    Image(nsImage:sticker.thumbnail).resizable().scaledToFit().frame(width:84,height:84)
+                                    Text(sticker.name).font(.caption).lineLimit(1).foregroundStyle(.primary)
+                                }
+                                .frame(maxWidth:.infinity).padding(10)
+                                .background(Color(nsColor:.controlBackgroundColor),in:RoundedRectangle(cornerRadius:10))
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .topTooltip(sticker.name + " · 클릭하여 삽입")
+                            .accessibilityLabel(sticker.name + " 스티커 삽입")
+                            .contextMenu {
+                                Button("스티커 삭제",role:.destructive) { attempt { try library.remove(sticker) } }
+                            }
+                        }
+                    }.padding(20)
+                }
+            }
+            Divider()
+            Text("클릭하여 노트에 넣기 · 우클릭하여 스티커함에서 삭제")
+                .font(.caption).foregroundStyle(.secondary).padding(12)
+        }
+        .frame(width:640,height:480)
+        .background(Color(nsColor:.windowBackgroundColor))
+        .onAppear { library.reload(); errorMessage = library.loadError }
+        .alert("스티커 오류",isPresented:Binding(get:{errorMessage != nil},set:{if !$0 {errorMessage = nil}})) {
+            Button("확인") { errorMessage = nil }
+        } message: { Text(errorMessage ?? "") }
     }
 }
 

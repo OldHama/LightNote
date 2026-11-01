@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import ImageIO
 
 @MainActor
 final class AppPreferences: ObservableObject {
@@ -135,5 +136,93 @@ struct PreferencesView: View {
                 }
             }.formStyle(.grouped).tabItem { Label("업데이트", systemImage: "arrow.down.circle") }
         }.padding(16).frame(minWidth: 480, idealWidth: 520, minHeight: 500, idealHeight: 560)
+    }
+}
+
+// Registered stickers are independent of notes; inserted copies embed their PNG.
+@MainActor
+final class StickerLibrary: ObservableObject {
+    struct Sticker: Identifiable {
+        let id: String
+        let name: String
+        let thumbnail: NSImage
+    }
+    static let shared = StickerLibrary(directory: RecoveryLocations.parent.appendingPathComponent("Stickers"))
+    let directory: URL
+    @Published private(set) var stickers: [Sticker] = []
+    @Published private(set) var loadError: String?
+    init(directory: URL) { self.directory = directory; reload() }
+    func reload() {
+        do {
+            guard FileManager.default.fileExists(atPath: directory.path) else { stickers = []; loadError = nil; return }
+            let urls = try FileManager.default.contentsOfDirectory(at:directory,includingPropertiesForKeys:[.creationDateKey],options:.skipsHiddenFiles)
+                .filter { $0.pathExtension.lowercased() == "png" }
+                .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+            stickers = urls.compactMap { url in
+                guard let source = CGImageSourceCreateWithURL(url as CFURL,nil),
+                      let thumb = CGImageSourceCreateThumbnailAtIndex(source,0,[
+                        kCGImageSourceCreateThumbnailFromImageAlways:true,
+                        kCGImageSourceCreateThumbnailWithTransform:true,
+                        kCGImageSourceThumbnailMaxPixelSize:200] as CFDictionary) else { return nil }
+                let name = url.deletingPathExtension().lastPathComponent.components(separatedBy:"__").dropLast().joined(separator:"__")
+                return Sticker(id:url.lastPathComponent,name:name.isEmpty ? "스티커" : name,thumbnail:NSImage(cgImage:thumb,size:.zero))
+            }
+            loadError = nil
+        } catch { loadError = error.localizedDescription }
+    }
+    @discardableResult
+    func add(data: Data, name: String) throws -> Sticker {
+        guard data.count <= 50_000_000,
+              let source = CGImageSourceCreateWithData(data as CFData,nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source,0,nil) as? [CFString:Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+              let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
+              width.doubleValue > 0, height.doubleValue > 0,
+              width.doubleValue*height.doubleValue <= 32_000_000,
+              CGImageSourceCreateThumbnailAtIndex(source,0,[kCGImageSourceCreateThumbnailFromImageAlways:true,
+                kCGImageSourceCreateThumbnailWithTransform:true,kCGImageSourceThumbnailMaxPixelSize:200] as CFDictionary) != nil else {
+            throw NSError(domain:"LightNote.Stickers",code:1,userInfo:[NSLocalizedDescriptionKey:"이미지를 읽을 수 없거나 너무 큽니다. 50MB·3,200만 픽셀 이하의 이미지를 선택해 주세요."])
+        }
+        let png: Data
+        if data.starts(with:[137,80,78,71,13,10,26,10]) { png = data }
+        else {
+            guard let image = CGImageSourceCreateThumbnailAtIndex(source,0,[
+                    kCGImageSourceCreateThumbnailFromImageAlways:true,kCGImageSourceCreateThumbnailWithTransform:true,
+                    kCGImageSourceThumbnailMaxPixelSize:max(width.intValue,height.intValue)] as CFDictionary),
+                  let encoded = NSBitmapImageRep(cgImage:image).representation(using:.png,properties:[:]) else {
+                throw NSError(domain:"LightNote.Stickers",code:2,userInfo:[NSLocalizedDescriptionKey:"스티커 이미지를 변환하지 못했습니다."])
+            }
+            png = encoded
+        }
+        guard png.count <= 50_000_000 else {
+            throw NSError(domain:"LightNote.Stickers",code:3,userInfo:[NSLocalizedDescriptionKey:"변환한 이미지가 너무 큽니다. 더 작은 이미지를 선택해 주세요."])
+        }
+        let title = String(name.trimmingCharacters(in:.whitespacesAndNewlines).prefix(40))
+            .replacingOccurrences(of:"/",with:" ").replacingOccurrences(of:":",with:" ")
+        try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
+        let id = (title.isEmpty ? "스티커" : title) + "__" + UUID().uuidString + ".png"
+        let url = directory.appendingPathComponent(id)
+        try RecoveryJournal.durableWrite(png,to:url)
+        reload()
+        guard let item = stickers.first(where:{$0.id == id}) else {
+            throw NSError(domain:"LightNote.Stickers",code:4,userInfo:[NSLocalizedDescriptionKey:"등록한 스티커를 표시하지 못했습니다."])
+        }
+        return item
+    }
+    func importImage(at url: URL) throws {
+        let size = try url.resourceValues(forKeys:[.fileSizeKey]).fileSize ?? 0
+        guard size <= 50_000_000 else {
+            throw NSError(domain:"LightNote.Stickers",code:5,userInfo:[NSLocalizedDescriptionKey:"50MB 이하의 이미지로 등록해 주세요."])
+        }
+        try add(data:Data(contentsOf:url),name:url.deletingPathExtension().lastPathComponent)
+    }
+    func data(for sticker: Sticker) throws -> Data {
+        guard stickers.contains(where:{$0.id == sticker.id}) else { throw CocoaError(.fileNoSuchFile) }
+        return try Data(contentsOf:directory.appendingPathComponent(sticker.id))
+    }
+    func remove(_ sticker: Sticker) throws {
+        guard stickers.contains(where:{$0.id == sticker.id}) else { return }
+        try FileManager.default.removeItem(at:directory.appendingPathComponent(sticker.id))
+        reload()
     }
 }

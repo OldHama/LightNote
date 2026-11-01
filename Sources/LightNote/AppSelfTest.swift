@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import SwiftUI
 import os
 
@@ -770,6 +771,59 @@ enum AppSelfTest {
         nearBoundaryDoc.updateChangeCount(.changeCleared); nearBoundaryDoc.close()
         pageDoc.updateChangeCount(.changeCleared); pageDoc.close()
         reopenedPages.updateChangeCount(.changeCleared); reopenedPages.close()
+        let stickersFolder = FileManager.default.temporaryDirectory.appendingPathComponent("LightNote-stickers-"+UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at:stickersFolder) }
+        let stickerLibrary = StickerLibrary(directory:stickersFolder)
+        let sticker = try stickerLibrary.add(data:png,name:"테스트")
+        let duplicateSticker = try stickerLibrary.add(data:png,name:"테스트")
+        try expect(sticker.id != duplicateSticker.id && stickerLibrary.stickers.count == 2,"Sticker registration overwrote an existing item")
+        let reopenedLibrary = StickerLibrary(directory:stickersFolder)
+        try expect(reopenedLibrary.stickers.count == 2 && reopenedLibrary.stickers.allSatisfy{$0.thumbnail.size.width > 0},"Sticker library did not survive reload")
+        do {
+            _ = try stickerLibrary.add(data:Data("invalid image".utf8),name:"잘못된 이미지")
+            throw Failure(message:"Invalid sticker was accepted")
+        } catch is Failure { throw Failure(message:"Invalid sticker was accepted") }
+          catch { /* Expected validation error. */ }
+        try expect(stickerLibrary.stickers.count == 2,"Invalid sticker changed library")
+        let stickerDoc = NoteDocument()
+        let stickerCanvas = InkCanvasView(state:stickerDoc.state)
+        stickerDoc.undoManager?.groupsByEvent = false
+        let stickerData = try stickerLibrary.data(for:sticker)
+        stickerDoc.undoManager?.beginUndoGrouping()
+        try expect(stickerCanvas.insertSticker(stickerData),"Sticker insertion failed")
+        stickerDoc.undoManager?.endUndoGrouping()
+        let insertedSticker = stickerDoc.state.note.strokes[0]
+        try expect(insertedSticker.tool == "image" && insertedSticker.imagePNG == png && stickerDoc.state.hasSelection,
+                   "Inserted sticker lost image or selection")
+        stickerDoc.undoInk(nil)
+        try expect(stickerDoc.state.note.strokes.isEmpty,"Sticker insert undo failed")
+        stickerDoc.redoInk(nil)
+        try expect(stickerDoc.state.note.strokes == [insertedSticker],"Sticker insert redo failed")
+        stickerDoc.undoManager?.beginUndoGrouping()
+        try expect(stickerCanvas.insertSticker(stickerData),"Repeated sticker insertion failed")
+        stickerDoc.undoManager?.endUndoGrouping()
+        try expect(Set(stickerDoc.state.note.strokes.map(\.id)).count == 2,"Repeated sticker reused object ID")
+        let savedStickers = try NoteFile.decode(stickerDoc.data(ofType:"com.lightnote.note"))
+        try stickerLibrary.remove(sticker)
+        try expect(stickerLibrary.stickers.count == 1 && savedStickers.strokes.allSatisfy{$0.imagePNG == png},
+                   "Deleting library item changed embedded stickers")
+        let jpegData = NSMutableData()
+        let jpegDestination = CGImageDestinationCreateWithData(jpegData,"public.jpeg" as CFString,1,nil)!
+        CGImageDestinationAddImage(jpegDestination,NSBitmapImageRep(data:png)!.cgImage!,[kCGImagePropertyOrientation:6] as CFDictionary)
+        try expect(CGImageDestinationFinalize(jpegDestination),"Oriented JPEG fixture failed")
+        let rotatedSticker = try stickerLibrary.add(data:jpegData as Data,name:"회전 이미지")
+        let rotatedBitmap = NSBitmapImageRep(data:try stickerLibrary.data(for:rotatedSticker))!
+        try expect(rotatedBitmap.pixelsWide == 20 && rotatedBitmap.pixelsHigh == 40,"Sticker import ignored image orientation")
+        for x in 0..<20 { for y in 0..<20 {
+            let pixel = bitmap.bitmapData! + y*bitmap.bytesPerRow+x*4
+            pixel[0] = 0; pixel[1] = 0; pixel[2] = 0; pixel[3] = 0
+        } }
+        let transparentPNG = bitmap.representation(using:.png,properties:[:])!
+        let transparentSticker = try stickerLibrary.add(data:transparentPNG,name:"투명 스티커")
+        let transparentSaved = try stickerLibrary.data(for:transparentSticker)
+        try expect(transparentSaved == transparentPNG && NSBitmapImageRep(data:transparentSaved)!.colorAt(x:5,y:5)!.alphaComponent == 0,
+                   "Transparent sticker lost its alpha channel")
+        stickerDoc.updateChangeCount(.changeCleared); stickerDoc.close()
         print("Verified: Shift pen line/press/release/mid-stroke/undo/redo/save; Q free-arrow drawing/head-selection/delete/undo/redo/save; 100 taps; 2002-sample stroke; mid-stroke save continuity; style; undo/redo; interruption; dot pixels; grid pixels/style undo/redo; stroke eraser click/sweep/undo/redo/keys; rectangle selection/move/undo/redo/save; zoom transforms/ink/eraser/reset; outer viewport grid/input/reopen; shapes/command circle/corner resize/undo/redo; laser hold/release/expiry/non-persistence; managed note automatic save/reopen; disk roundtrip; corrupt read")
         doc.updateChangeCount(.changeCleared)
         doc.close()
@@ -1339,6 +1393,27 @@ extension AppSelfTest {
             }
         }
 
+        let stickerUIFolder = FileManager.default.temporaryDirectory.appendingPathComponent("LightNote-sticker-ui-"+UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at:stickerUIFolder) }
+        let stickerUILibrary = StickerLibrary(directory:stickerUIFolder)
+        let fixture = NSBitmapImageRep(bitmapDataPlanes:nil,pixelsWide:32,pixelsHigh:32,bitsPerSample:8,samplesPerPixel:4,hasAlpha:true,isPlanar:false,colorSpaceName:.deviceRGB,bytesPerRow:0,bitsPerPixel:0)!
+        for (index,name) in ["체크", "중요", "칭찬"].enumerated() {
+            for x in 0..<32 { for y in 0..<32 {
+                let pixel = fixture.bitmapData! + y*fixture.bytesPerRow+x*4
+                pixel[0] = index == 0 ? 40 : 240
+                pixel[1] = index == 1 ? 180 : 100
+                pixel[2] = index == 2 ? 220 : 60
+                pixel[3] = 255
+            } }
+            try stickerUILibrary.add(data:fixture.representation(using:.png,properties:[:])!,name:name)
+        }
+        window.setContentSize(NSSize(width:640,height:480))
+        window.contentView = NSHostingView(rootView:StickerLibraryView(state:state,library:stickerUILibrary))
+        try await Task.sleep(for:.milliseconds(150))
+        window.contentView!.layoutSubtreeIfNeeded()
+        let stickerUIBitmap = window.contentView!.bitmapImageRepForCachingDisplay(in:window.contentView!.bounds)!
+        window.contentView!.cacheDisplay(in:window.contentView!.bounds,to:stickerUIBitmap)
+        try stickerUIBitmap.representation(using:.png,properties:[:])!.write(to:URL(fileURLWithPath:"/tmp/lightnote-stickers-preview.png"))
         let anchor = TooltipAnchorView(text:"볼펜 · P")
         anchor.frame = NSRect(x:100,y:7,width:44,height:44)
         window.contentView = anchor

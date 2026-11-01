@@ -91,6 +91,9 @@ final class NoteState: NSObject, ObservableObject {
     @Published var hasSelection = false
     @Published var workspacePageCount = 1
     @Published var visiblePage = 1
+    var stickerSelectionPNG: (() throws -> Data?)?
+    var insertSticker: ((Data) -> Bool)?
+    @Published var showStickers = false
     var copySelectionPNG: (() -> Void)?
     var exportSelectionPNG: (() -> Void)?
     var copyInk: (() -> Void)?
