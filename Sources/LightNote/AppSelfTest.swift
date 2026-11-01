@@ -583,6 +583,25 @@ enum AppSelfTest {
         lockButton.performClick(nil)
         destinationDoc.undoManager?.endUndoGrouping()
         try expect(destinationDoc.state.note == beforePNG,"Unlock button failed")
+        destinationCanvas.cacheDisplay(in:destinationCanvas.bounds,to:lockBitmap)
+        let buttonBeforeDrag = lockButton.frame
+        func selectionDragEvent(_ type:NSEvent.EventType,_ point:CGPoint,_ time:Double) -> NSEvent {
+            NSEvent.mouseEvent(with:type,location:destinationCanvas.convert(point,to:nil),modifierFlags:[],timestamp:time,
+                windowNumber:0,context:nil,eventNumber:0,clickCount:1,pressure:0)!
+        }
+        let dragStart = CGPoint(x:exportedRect.midX,y:exportedRect.midY)
+        let dragEnd = CGPoint(x:dragStart.x+40,y:dragStart.y+25)
+        destinationDoc.undoManager?.beginUndoGrouping()
+        destinationCanvas.mouseDown(with:selectionDragEvent(.leftMouseDown,dragStart,1400))
+        destinationCanvas.mouseDragged(with:selectionDragEvent(.leftMouseDragged,dragEnd,1401))
+        try expect(abs(lockButton.frame.minX-buttonBeforeDrag.minX-40) < 0.01 && abs(lockButton.frame.minY-buttonBeforeDrag.minY-25) < 0.01,
+                   "Lock button did not follow live selection drag")
+        try expect(lockButton.frame.size == CGSize(width:36,height:26),"Lock button size was not reduced")
+        destinationCanvas.mouseUp(with:selectionDragEvent(.leftMouseUp,dragEnd,1402))
+        destinationDoc.undoManager?.endUndoGrouping()
+        destinationCanvas.cacheDisplay(in:destinationCanvas.bounds,to:lockBitmap)
+        try expect(abs(lockButton.frame.minX-buttonBeforeDrag.minX-40) < 0.01 && abs(lockButton.frame.minY-buttonBeforeDrag.minY-25) < 0.01,
+                   "Lock button jumped after move commit")
         destinationDoc.updateChangeCount(.changeCleared); destinationDoc.close()
         canvas.keyDown(with: toolKey("q", code: 12))
         try expect(doc.state.tool == .freeArrow, "Q did not select free arrow")

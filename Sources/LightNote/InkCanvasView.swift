@@ -162,7 +162,8 @@ final class InkCanvasView: NSView {
         }
         if button.superview == nil { addSubview(button) }
         let scale = enclosingScrollView?.magnification ?? 1
-        let box = NSRect(x:rect.midX-22/scale,y:rect.maxY+6/scale,width:44/scale,height:32/scale)
+        let displayed = rect.applying(selectionTransform)
+        let box = NSRect(x:displayed.midX-18/scale,y:displayed.maxY+6/scale,width:36/scale,height:26/scale)
         if button.frame != box { button.frame = box }
         let allLocked = state.note.strokes.filter { selectedIDs.contains($0.id) }.allSatisfy(\.isLocked)
         button.isObjectLocked = allLocked
@@ -709,6 +710,7 @@ final class InkCanvasView: NSView {
         marqueeStart = nil; marqueeRect = nil; moveStart = nil; moveDelta = .zero; resizeDrag = nil
     }
     private func updateSelection(with event: NSEvent) {
+        defer { updateSelectionLockButton() }
         let point = convert(event.locationInWindow, from: nil)
         guard point.x.isFinite, point.y.isFinite else { return }
         let padding = handleRadius * 2
