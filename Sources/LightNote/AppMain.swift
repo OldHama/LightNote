@@ -18,7 +18,7 @@ struct LightNoteMain {
             arguments["ApplePersistenceIgnoreState"] = true
             UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         }
-        let focusReturnApp = CommandLine.arguments.contains("--focus-self-test") ? NSWorkspace.shared.frontmostApplication : nil
+        let focusReturnApp = (CommandLine.arguments.contains("--focus-self-test") || CommandLine.arguments.contains("--toolbar-self-test")) ? NSWorkspace.shared.frontmostApplication : nil
         let application = NSApplication.shared
         let delegate = AppDelegate()
         delegate.focusTestReturnApplication = focusReturnApp
@@ -63,6 +63,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
             Task { @MainActor in
                 do { try await AppSelfTest.runRecoveryProcess() }
                 catch { fputs("RECOVERY_PROCESS_FAILED: \(error)\n", stderr); exit(1) }
+            }
+            return
+        }
+        if CommandLine.arguments.contains("--toolbar-self-test") {
+            Task { @MainActor in
+                do { try await AppSelfTest.testToolbarHitAreas(returnTo: focusTestReturnApplication); print("TOOLBAR_HIT_TEST_PASSED"); exit(0) }
+                catch { fputs("TOOLBAR_HIT_TEST_FAILED: \(error)\n", stderr); exit(1) }
             }
             return
         }

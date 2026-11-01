@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import os
 
 /// In-process native event integration checks. These do not simulate Sidecar hardware.
@@ -1095,5 +1096,40 @@ extension AppSelfTest {
         let key=NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:[],timestamp:7,windowNumber:window.windowNumber,context:nil,characters:"e",charactersIgnoringModifiers:"e",isARepeat:false,keyCode:14)!
         NSApp.sendEvent(key)
         guard doc.state.tool == .eraser, window.firstResponder === canvas else { throw Failure(message:"Canvas shortcuts did not follow focus") }
+    }
+}
+
+
+extension AppSelfTest {
+    static func testToolbarHitAreas(returnTo original: NSRunningApplication?) async throws {
+        let state = NoteState()
+        let window = NSWindow(contentRect:NSRect(x:150,y:150,width:352,height:58),styleMask:[.titled,.closable],backing:.buffered,defer:false)
+        window.isReleasedWhenClosed = false
+        window.title = "도구 버튼 클릭 검사"
+        window.contentView = NSHostingView(rootView:DrawingToolStrip(state:state).frame(width:352,height:58))
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.close()
+            if let original, original.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+                NSApp.yieldActivation(to:original); original.activate(options:[])
+            }
+        }
+        try await Task.sleep(for:.milliseconds(100))
+        window.contentView!.layoutSubtreeIfNeeded()
+        let tools:[InkTool] = [.pen,.eraser,.selection,.laser,.ellipse,.rectangle,.freeArrow,.arrow]
+        for (index,tool) in tools.enumerated() {
+            // Opposite corners are deliberately outside the symbol's painted pixels.
+            for offset in [CGPoint(x:2,y:9),CGPoint(x:42,y:49)] {
+                state.selectTool(tool == .pen ? .eraser : .pen)
+                let point = CGPoint(x:CGFloat(index)*44+offset.x,y:offset.y)
+                let time = ProcessInfo.processInfo.systemUptime
+                let down=NSEvent.mouseEvent(with:.leftMouseDown,location:point,modifierFlags:[],timestamp:time,windowNumber:window.windowNumber,context:nil,eventNumber:0,clickCount:1,pressure:1)!
+                let up=NSEvent.mouseEvent(with:.leftMouseUp,location:point,modifierFlags:[],timestamp:time+0.01,windowNumber:window.windowNumber,context:nil,eventNumber:1,clickCount:1,pressure:0)!
+                NSApp.postEvent(up,atStart:true)
+                NSApp.sendEvent(down)
+                try await Task.sleep(for:.milliseconds(30))
+                guard state.tool == tool else { throw Failure(message:"Toolbar padding did not activate \(tool.title), offset=\(offset)") }
+            }
+        }
     }
 }

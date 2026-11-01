@@ -34,38 +34,7 @@ struct EditorView: View {
                     Button { state.document?.redoInk(nil) } label: { Image(systemName: "arrow.uturn.forward") }
                         .disabled(!state.canRedo).help("다시 실행 · ⌘⇧Z").accessibilityLabel("다시 실행")
                     Divider().frame(height: 22)
-                    Button { state.selectTool(.pen) } label: {
-                        Image(systemName: "pencil.tip")
-                            .foregroundStyle(state.tool == .pen ? Color.accentColor : .secondary)
-                    }.help("볼펜 · P").accessibilityLabel("볼펜")
-                    Button { state.selectTool(.eraser) } label: {
-                        Image(systemName: "eraser")
-                            .foregroundStyle(state.tool == .eraser ? Color.accentColor : .secondary)
-                    }.help("획 지우개 · E").accessibilityLabel("획 지우개")
-                    Button { state.selectTool(.selection) } label: {
-                        Image(systemName: "selection.pin.in.out")
-                            .foregroundStyle(state.tool == .selection ? Color.accentColor : .secondary)
-                    }.help("사각형 선택 · V").accessibilityLabel("사각형 선택")
-                    Button { state.selectTool(.laser) } label: {
-                        Image(systemName: "dot.scope")
-                            .foregroundStyle(state.tool == .laser ? Color.red : .secondary)
-                    }.help("레이저 · L").accessibilityLabel("레이저")
-                    Button { state.selectTool(.ellipse) } label: {
-                        Image(systemName: "circle")
-                            .foregroundStyle(state.tool == .ellipse ? Color.accentColor : .secondary)
-                    }.help("원 / 타원 · C · ⌘ 정원").accessibilityLabel("원 / 타원")
-                    Button { state.selectTool(.rectangle) } label: {
-                        Image(systemName: "rectangle")
-                            .foregroundStyle(state.tool == .rectangle ? Color.accentColor : .secondary)
-                    }.help("사각형 · R · ⌘ 정사각형").accessibilityLabel("사각형")
-                    Button { state.selectTool(.freeArrow) } label: {
-                        Image(systemName: "arrow.turn.up.right")
-                            .foregroundStyle(state.tool == .freeArrow ? Color.accentColor : .secondary)
-                    }.help("자유 화살표 · Q").accessibilityLabel("자유 화살표")
-                    Button { state.selectTool(.arrow) } label: {
-                        Image(systemName: "arrow.up.right")
-                            .foregroundStyle(state.tool == .arrow ? Color.accentColor : .secondary)
-                    }.help("화살표 · A").accessibilityLabel("화살표")
+                    DrawingToolStrip(state: state)
                     ForEach(preferences.colorPresets, id: \.key) { preset in
                         Button { state.color = preset.color } label: {
                             Circle().fill(Color(cgColor: preset.color.cgColor)).frame(width: 19, height: 19)
@@ -131,6 +100,34 @@ struct EditorView: View {
         }
         .frame(minWidth: 740, minHeight: 440)
         .sheet(isPresented: $state.showShortcuts) { ShortcutHelpView() }
+    }
+}
+
+/// Contiguous full-size targets: the padding belongs to each Button's label.
+struct DrawingToolStrip: View {
+    @ObservedObject var state: NoteState
+    private func tool(_ value: InkTool, help: String) -> some View {
+        Button { state.selectTool(value) } label: {
+            Image(systemName: value.symbol)
+                .foregroundStyle(state.tool == value ? (value == .laser ? Color.red : Color.accentColor) : Color.secondary)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(value.title)
+    }
+    var body: some View {
+        HStack(spacing: 0) {
+            tool(.pen, help: "볼펜 · P")
+            tool(.eraser, help: "획 지우개 · E")
+            tool(.selection, help: "사각형 선택 · V")
+            tool(.laser, help: "레이저 · L")
+            tool(.ellipse, help: "원 / 타원 · C · ⌘ 정원")
+            tool(.rectangle, help: "사각형 · R · ⌘ 정사각형")
+            tool(.freeArrow, help: "자유 화살표 · Q")
+            tool(.arrow, help: "화살표 · A")
+        }
     }
 }
 
