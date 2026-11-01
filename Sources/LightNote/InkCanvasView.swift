@@ -140,8 +140,8 @@ final class InkCanvasView: NSView {
     private var selectionContainsLocked: Bool {
         state.note.strokes.contains { selectedIDs.contains($0.id) && $0.isLocked }
     }
-    private lazy var selectionLockButton: NSButton = {
-        let button = NSButton(title:"",target:self,action:#selector(toggleSelectionLock))
+    private lazy var selectionLockButton: SelectionLockButton = {
+        let button = SelectionLockButton(title:"",target:self,action:#selector(toggleSelectionLock))
         button.bezelStyle = .rounded
         button.imagePosition = .imageOnly
         button.imageScaling = .scaleProportionallyDown
@@ -165,8 +165,7 @@ final class InkCanvasView: NSView {
         let box = NSRect(x:rect.midX-22/scale,y:rect.maxY+6/scale,width:44/scale,height:32/scale)
         if button.frame != box { button.frame = box }
         let allLocked = state.note.strokes.filter { selectedIDs.contains($0.id) }.allSatisfy(\.isLocked)
-        button.image = NSImage(systemSymbolName:allLocked ? "lock.fill" : "lock.open",accessibilityDescription:nil)
-        button.image?.size = NSSize(width:16/scale,height:16/scale)
+        button.isObjectLocked = allLocked
         button.toolTip = allLocked ? "잠금 해제" : "객체 잠금"
         button.setAccessibilityLabel(allLocked ? "선택 객체 잠금 해제" : "선택 객체 잠금")
         button.isHidden = false
@@ -1053,5 +1052,45 @@ final class InkCanvasView: NSView {
             if let tail { context.addLine(to: tail) }
             context.strokePath()
         }
+    }
+}
+
+
+/// Explicit colors prevent a dark-mode white template icon disappearing on paper.
+@MainActor
+private final class SelectionLockButton: NSButton {
+    var isObjectLocked = false { didSet { if oldValue != isObjectLocked { needsDisplay = true } } }
+    private var hovering = false
+    private var hoverArea: NSTrackingArea?
+    override func updateTrackingAreas() {
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect:bounds,options:[.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self)
+        addTrackingArea(area); hoverArea = area
+        super.updateTrackingAreas()
+    }
+    override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
+    override func draw(_ dirtyRect: NSRect) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        context.saveGState()
+        defer { context.restoreGState() }
+        context.scaleBy(x:bounds.width/44,y:bounds.height/32)
+        if isFlipped { context.translateBy(x:0,y:32); context.scaleBy(x:1,y:-1) }
+        let blue = NSColor(srgbRed:0.08,green:0.32,blue:0.78,alpha:1).cgColor
+        let background = isHighlighted ? NSColor(srgbRed:0.75,green:0.85,blue:1,alpha:1) :
+            (hovering ? NSColor(srgbRed:0.88,green:0.93,blue:1,alpha:1) : NSColor.white)
+        let bezel = CGPath(roundedRect:CGRect(x:1,y:1,width:42,height:30),cornerWidth:7,cornerHeight:7,transform:nil)
+        context.setFillColor(background.cgColor); context.addPath(bezel); context.fillPath()
+        context.setStrokeColor(blue); context.setLineWidth(1.5)
+        context.addPath(bezel); context.strokePath()
+        context.setLineWidth(2); context.setLineCap(.round); context.setLineJoin(.round)
+        let body = CGPath(roundedRect:CGRect(x:16,y:7,width:12,height:11),cornerWidth:2,cornerHeight:2,transform:nil)
+        context.addPath(body); context.strokePath()
+        context.beginPath()
+        context.move(to:CGPoint(x:18,y:18)); context.addLine(to:CGPoint(x:18,y:21))
+        context.addCurve(to:CGPoint(x:26,y:21),control1:CGPoint(x:18,y:27),control2:CGPoint(x:26,y:27))
+        if isObjectLocked { context.addLine(to:CGPoint(x:26,y:18)) }
+        context.strokePath()
+        context.setFillColor(blue); context.fillEllipse(in:CGRect(x:21,y:11,width:2,height:3))
     }
 }

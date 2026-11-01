@@ -559,6 +559,11 @@ enum AppSelfTest {
             throw Failure(message:"Selection lock button missing")
         }
         try expect(!lockButton.isHidden,"Selection lock button hidden")
+        let buttonPreview = lockButton.bitmapImageRepForCachingDisplay(in:lockButton.bounds)!
+        lockButton.cacheDisplay(in:lockButton.bounds,to:buttonPreview)
+        try buttonPreview.representation(using:.png,properties:[:])!.write(to:URL(fileURLWithPath:"/tmp/lightnote-lock-button-preview.png"))
+        let center = buttonPreview.colorAt(x:buttonPreview.pixelsWide/2,y:buttonPreview.pixelsHigh/2)!.usingColorSpace(.deviceRGB)!
+        try expect(center.alphaComponent > 0.95,"Lock button has no opaque background")
         destinationDoc.undoManager?.beginUndoGrouping()
         lockButton.performClick(nil)
         destinationDoc.undoManager?.endUndoGrouping()
