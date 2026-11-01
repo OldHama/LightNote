@@ -35,6 +35,10 @@ struct EditorView: View {
                         .disabled(!state.canRedo).topTooltip("다시 실행 · ⌘⇧Z").accessibilityLabel("다시 실행")
                     Divider().frame(height: 22)
                     DrawingToolStrip(state: state)
+                    Button { state.copySelectionPNG?() } label: { Image(systemName: "photo.on.rectangle") }
+                        .disabled(!state.hasSelection).topTooltip("선택 영역 PNG 복사 · ⌘⇧C").accessibilityLabel("선택 영역 PNG 복사")
+                    Button { state.exportSelectionPNG?() } label: { Image(systemName: "square.and.arrow.up") }
+                        .disabled(!state.hasSelection).topTooltip("선택 영역 PNG 내보내기 · ⌘⇧E").accessibilityLabel("선택 영역 PNG 내보내기")
                     ColorPresetStrip(state: state)
                     ColorPicker("색상", selection: Binding(get: { Color(cgColor: state.color.cgColor) }, set: {
                         guard let c = NSColor($0).usingColorSpace(.sRGB) else { return }
@@ -290,6 +294,7 @@ private struct ShortcutHelpView: View {
                     row("⌘ D", "선택한 획 복제")
                     row("⌫ / Delete", "선택한 획 삭제")
                     row("Esc", "선택 해제 · 도형 취소 · 도움말 닫기")
+                    row("⌘ ⇧ C / ⌘ ⇧ E", "선택 영역 PNG 복사 / 내보내기")
                     row("⌘ 누르기", "객체 선택 · 빈 선택은 이전 도구로")
                     row("⌘ ,", "환경설정")
                     row("⌘ N", "새 노트")

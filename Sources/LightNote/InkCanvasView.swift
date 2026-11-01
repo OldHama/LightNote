@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import OSLog
+import UniformTypeIdentifiers
 
 struct CanvasHost: NSViewRepresentable {
     let state: NoteState
@@ -171,6 +172,8 @@ final class InkCanvasView: NSView {
         self.state = state
         super.init(frame: CGRect(x: 0, y: 0, width: state.note.pageWidth, height: state.note.pageHeight))
         expandWorkspaceToStoredInk()
+        state.copySelectionPNG = { [weak self] in self?.performPNGAction(export: false) }
+        state.exportSelectionPNG = { [weak self] in self?.performPNGAction(export: true) }
         state.copyInk = { [weak self] in self?.copySelection() }
         state.pasteInk = { [weak self] in self?.pasteSelection() }
         state.duplicateInk = { [weak self] in self?.duplicateSelection() }
@@ -417,6 +420,74 @@ final class InkCanvasView: NSView {
         if !event.isEnteringProximity { finishStroke(reason: "proximity-exit") }
     }
 
+    /// Render selected objects only, in document order, without handles or laser.
+    /// Paper/grid is included for a ready-to-share lesson image, independent of zoom.
+    func selectionPNG() throws -> Data? {
+        finishStroke(reason: "selection-png")
+        let strokes = state.note.strokes.filter { selectedIDs.contains($0.id) }
+        guard !strokes.isEmpty else { return nil }
+        let box = strokes.reduce(CGRect.null) { $0.union($1.bounds) }.insetBy(dx: -8, dy: -8).integral
+        let scale: CGFloat = 2
+        let width = ceil(box.width * scale), height = ceil(box.height * scale)
+        guard width.isFinite, height.isFinite, width > 0, height > 0,
+              width <= 16384, height <= 16384, width * height <= 32_000_000,
+              let bitmap = NSBitmapImageRep(bitmapDataPlanes:nil,pixelsWide:Int(width),pixelsHigh:Int(height),
+                bitsPerSample:8,samplesPerPixel:4,hasAlpha:true,isPlanar:false,colorSpaceName:.deviceRGB,bytesPerRow:0,bitsPerPixel:0),
+              let graphics = NSGraphicsContext(bitmapImageRep:bitmap) else {
+            throw NSError(domain:"LightNote.PNG",code:1,userInfo:[NSLocalizedDescriptionKey:"선택 영역이 너무 큽니다. 작은 영역으로 나누어 내보내 주세요."])
+        }
+        let context = graphics.cgContext
+        context.translateBy(x:0,y:height)
+        context.scaleBy(x:scale,y:-scale)
+        context.translateBy(x:-box.minX,y:-box.minY)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext:context,flipped:true)
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        context.setFillColor(state.note.paperStyle == .grid ? AppPreferences.shared.paperColor.cgColor : NSColor.white.cgColor)
+        context.fill(box)
+        if state.note.paperStyle == .grid { drawGrid(in:box,context:context) }
+        context.setAllowsAntialiasing(true); context.setShouldAntialias(true)
+        for stroke in strokes {
+            if stroke.tool == "image", let data = stroke.imagePNG, let image = NSImage(data:data), stroke.samples.count == 2 {
+                let a = stroke.samples[0].point, b = stroke.samples[1].point
+                let rect = CGRect(x:min(a.x,b.x),y:min(a.y,b.y),width:abs(b.x-a.x),height:abs(b.y-a.y))
+                image.draw(in:rect,from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
+            } else {
+                render(stroke,path:InkPathBuilder.make(stroke:stroke).path,in:context)
+            }
+        }
+        bitmap.size = box.size
+        guard let data = bitmap.representation(using:.png,properties:[:]) else {
+            throw NSError(domain:"LightNote.PNG",code:2,userInfo:[NSLocalizedDescriptionKey:"PNG 이미지를 만들지 못했습니다."])
+        }
+        return data
+    }
+    @discardableResult
+    func copyPNG(to board: NSPasteboard) throws -> Bool {
+        guard let data = try selectionPNG() else { return false }
+        board.clearContents()
+        return board.setData(data,forType:.png)
+    }
+    func writeSelectionPNG(to url: URL) throws {
+        guard let data = try selectionPNG() else { return }
+        try data.write(to:url,options:.atomic)
+    }
+    private func performPNGAction(export: Bool) {
+        do {
+            if !export { _ = try copyPNG(to:.general); return }
+            guard let window, let data = try selectionPNG() else { return }
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [.png]
+            panel.nameFieldStringValue = "선택 영역.png"
+            panel.title = "선택 영역 PNG 내보내기"
+            panel.beginSheetModal(for:window) { response in
+                guard response == .OK, let url = panel.url else { return }
+                do { try data.write(to:url,options:.atomic) }
+                catch { NSApp.presentError(error) }
+            }
+        } catch { NSApp.presentError(error) }
+    }
+
     @discardableResult
     func copySelection(to pasteboard: NSPasteboard? = nil) -> Bool {
         finishStroke(reason: "copy")
@@ -432,14 +503,14 @@ final class InkCanvasView: NSView {
     func pasteSelection(from pasteboard: NSPasteboard? = nil) -> Bool {
         let board = pasteboard ?? .general
         if board.data(forType: Self.inkPasteboardType) == nil {
-            guard let image = NSImage(pasteboard: board),
-                  let tiff = image.tiffRepresentation,
-                  let bitmap = NSBitmapImageRep(data: tiff),
-                  let png = bitmap.representation(using: .png, properties: [:]),
-                  png.count <= 50_000_000, image.size.width > 0, image.size.height > 0 else { return false }
+            let sourcePNG = board.data(forType:.png)
+            guard let data = sourcePNG ?? NSImage(pasteboard:board)?.tiffRepresentation,
+                  let bitmap = NSBitmapImageRep(data:data),
+                  let png = sourcePNG ?? bitmap.representation(using:.png,properties:[:]),
+                  png.count <= 50_000_000, bitmap.size.width > 0, bitmap.size.height > 0 else { return false }
             let viewport = visibleRect.isEmpty ? bounds : visibleRect
-            let scale = min(1, viewport.width * 0.7 / image.size.width, viewport.height * 0.7 / image.size.height)
-            let size = CGSize(width: max(1, image.size.width * scale), height: max(1, image.size.height * scale))
+            let scale = min(1, viewport.width * 0.7 / bitmap.size.width, viewport.height * 0.7 / bitmap.size.height)
+            let size = CGSize(width:max(1,bitmap.size.width*scale),height:max(1,bitmap.size.height*scale))
             var object = InkStroke(samples: [InkSample(x: viewport.midX-size.width/2, y: viewport.midY-size.height/2, time: 0),
                                               InkSample(x: viewport.midX+size.width/2, y: viewport.midY+size.height/2, time: 0)])
             object.tool = "image"; object.imagePNG = png

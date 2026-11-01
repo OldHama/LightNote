@@ -89,6 +89,8 @@ final class NoteState: NSObject, ObservableObject {
     var invalidateStrokeCache: ((Set<UUID>) -> Void)?
     @Published var recoveryMessage: String?
     @Published var hasSelection = false
+    var copySelectionPNG: (() -> Void)?
+    var exportSelectionPNG: (() -> Void)?
     var copyInk: (() -> Void)?
     var pasteInk: (() -> Void)?
     var duplicateInk: (() -> Void)?

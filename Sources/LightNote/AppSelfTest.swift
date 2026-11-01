@@ -486,7 +486,11 @@ enum AppSelfTest {
         let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 40, pixelsHigh: 20,
             bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
             colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
-        for x in 0..<40 { for y in 0..<20 { bitmap.setColor(y < 10 ? .red : .blue, atX: x, y: y) } }
+        for x in 0..<40 { for y in 0..<20 {
+            let pixel = bitmap.bitmapData! + y*bitmap.bytesPerRow + x*4
+            pixel[0] = y < 10 ? 255 : 0; pixel[1] = 0
+            pixel[2] = y < 10 ? 0 : 255; pixel[3] = 255
+        } }
         let png = bitmap.representation(using: .png, properties: [:])!
         board.clearContents(); board.setData(png, forType: .png)
         destinationDoc.undoManager?.beginUndoGrouping()
@@ -504,6 +508,50 @@ enum AppSelfTest {
         destinationDoc.transformStrokes(ids: [imageObject.id], using: CGAffineTransform(scaleX: 2, y: 2))
         destinationDoc.undoManager?.endUndoGrouping()
         try expect(destinationDoc.state.note.strokes.last!.imagePNG == imageObject.imagePNG && destinationDoc.state.note.strokes.last!.bounds.width > imageObject.bounds.width, "Image resize damaged payload")
+        // Export a mixed selection, including an embedded image and overlapping ink.
+        let selectedImage = destinationDoc.state.note.strokes.last!
+        let imageA = selectedImage.samples[0].point, imageB = selectedImage.samples[1].point
+        let imageRect = CGRect(x:min(imageA.x,imageB.x),y:min(imageA.y,imageB.y),width:abs(imageB.x-imageA.x),height:abs(imageB.y-imageA.y))
+        let green = InkColor(0,1,0)
+        let overlay = InkStroke(color:green,width:4,samples:[
+            InkSample(x:imageRect.minX+4,y:imageRect.midY,time:1),
+            InkSample(x:imageRect.maxX-4,y:imageRect.midY,time:2)])
+        let mixed = [selectedImage,overlay]
+        board.clearContents(); board.setData(try NoteFile(strokes:mixed).encoded(),forType:InkCanvasView.inkPasteboardType)
+        destinationDoc.undoManager?.beginUndoGrouping()
+        try expect(destinationCanvas.pasteSelection(from:board),"Mixed PNG fixture paste failed")
+        destinationDoc.undoManager?.endUndoGrouping()
+        let exportObjects = Array(destinationDoc.state.note.strokes.suffix(2))
+        let exportImage = exportObjects[0]
+        let a = exportImage.samples[0].point, b = exportImage.samples[1].point
+        let exportedRect = CGRect(x:min(a.x,b.x),y:min(a.y,b.y),width:abs(b.x-a.x),height:abs(b.y-a.y))
+        let crop = exportObjects.reduce(CGRect.null){$0.union($1.bounds)}.insetBy(dx:-8,dy:-8).integral
+        destinationDoc.undoManager?.beginUndoGrouping()
+        destinationDoc.append(InkStroke(color:InkColor(1,0,1),width:8,samples:[InkSample(x:exportedRect.midX,y:exportedRect.minY+exportedRect.height/4,time:3)]))
+        destinationDoc.undoManager?.endUndoGrouping()
+        let beforePNG = destinationDoc.state.note
+        let undoBeforePNG = destinationDoc.undoManager?.canUndo
+        let copiedPNG = try destinationCanvas.copyPNG(to:board)
+        try expect(copiedPNG,"PNG clipboard copy failed")
+        let exportedPNG = board.data(forType:.png)!
+        let exportedBitmap = NSBitmapImageRep(data:exportedPNG)!
+        try expect(exportedBitmap.pixelsWide == Int(crop.width*2) && exportedBitmap.pixelsHigh == Int(crop.height*2),"PNG crop/resolution incorrect")
+        func exportedColor(_ point:CGPoint) -> NSColor {
+            exportedBitmap.colorAt(x:Int((point.x-crop.minX)*2),y:Int((point.y-crop.minY)*2))!.usingColorSpace(.deviceRGB)!
+        }
+        let upper = exportedColor(CGPoint(x:exportedRect.midX,y:exportedRect.minY+exportedRect.height/4))
+        let lower = exportedColor(CGPoint(x:exportedRect.midX,y:exportedRect.minY+exportedRect.height*3/4))
+        let middle = exportedColor(CGPoint(x:exportedRect.midX,y:exportedRect.midY))
+        try expect(upper.redComponent > 0.8 && upper.blueComponent < 0.2 && lower.blueComponent > 0.8 && lower.redComponent < 0.2,
+                   "Exported image was flipped or included unselected ink: upper=\(upper) lower=\(lower) middle=\(middle)")
+        try expect(middle.greenComponent > 0.8 && middle.redComponent < 0.2,"PNG lost overlapping selected pen")
+        let pngURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".png")
+        defer { try? FileManager.default.removeItem(at:pngURL) }
+        try destinationCanvas.writeSelectionPNG(to:pngURL)
+        let diskPNG = try Data(contentsOf:pngURL)
+        try expect(diskPNG == exportedPNG,"Exported file differs from PNG clipboard")
+        try expect(destinationDoc.state.note == beforePNG && destinationDoc.undoManager?.canUndo == undoBeforePNG && destinationDoc.state.hasSelection,
+                   "PNG export changed document/undo/selection")
         destinationDoc.updateChangeCount(.changeCleared); destinationDoc.close()
         canvas.keyDown(with: toolKey("q", code: 12))
         try expect(doc.state.tool == .freeArrow, "Q did not select free arrow")

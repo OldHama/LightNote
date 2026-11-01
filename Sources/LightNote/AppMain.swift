@@ -181,7 +181,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
         activeNote?.state.duplicateInk?()
     }
+    @objc func copySelectionPNG(_ sender: Any?) { activeNote?.state.copySelectionPNG?() }
+    @objc func exportSelectionPNG(_ sender: Any?) { activeNote?.state.exportSelectionPNG?() }
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(copySelectionPNG(_:)) || menuItem.action == #selector(exportSelectionPNG(_:)) {
+            return !(NSApp.keyWindow?.firstResponder is NSTextView) && (activeNote?.state.hasSelection ?? false)
+        }
         if menuItem.action == #selector(copyDocumentSelection(_:)) {
             if let editor = NSApp.keyWindow?.firstResponder as? NSTextView { return editor.selectedRange().length > 0 }
             return activeNote?.state.hasSelection ?? false
@@ -305,6 +310,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         edit.addItem(.separator())
         item(edit, "잘라내기", #selector(NSText.cut(_:)), "x")
         item(edit, "복사", #selector(copyDocumentSelection(_:)), "c")
+        edit.items.last?.target = self
+        item(edit, "선택 영역 PNG 복사", #selector(copySelectionPNG(_:)), "c", modifiers: [.command, .shift])
+        edit.items.last?.target = self
+        item(edit, "선택 영역 PNG 내보내기…", #selector(exportSelectionPNG(_:)), "e", modifiers: [.command, .shift])
         edit.items.last?.target = self
         item(edit, "붙여넣기", #selector(pasteDocumentSelection(_:)), "v")
         edit.items.last?.target = self
