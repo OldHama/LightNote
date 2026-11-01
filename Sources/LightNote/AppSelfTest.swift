@@ -975,25 +975,22 @@ extension AppSelfTest {
         try await Task.sleep(for:.milliseconds(30))
         guard doc.state.note == local else { throw Failure(message:"External notification discarded local changes") }
         try await doc.persistLatest()
-        let copies = try FileManager.default.contentsOfDirectory(at:RecoveryLocations.copies,includingPropertiesForKeys:nil).filter{ !before.contains($0) }
-        guard try NoteFile.decode(Data(contentsOf:doc.fileURL!)) == local,
-              ((try NoteFile.decode(Data(contentsOf:source))) == external || copies.contains(where:{ (try? NoteFile.decode(Data(contentsOf:$0))) == external })) else {
-            throw Failure(message:"External save conflict did not preserve both notes")
+        let copies = ((try? FileManager.default.contentsOfDirectory(at:RecoveryLocations.copies,includingPropertiesForKeys:nil)) ?? []).filter{ !before.contains($0) }
+        guard doc.fileURL == source, try NoteFile.decode(Data(contentsOf:source)) == local,
+              copies.isEmpty, doc.state.recoveryMessage == nil else {
+            throw Failure(message:"External changes were not silently overwritten in place")
         }
         let corrupt = Data("corrupt external document".utf8)
         let current = doc.fileURL!
         try corrupt.write(to:current,options:.atomic)
         try await doc.persistLatest()
-        let allCopies = try FileManager.default.contentsOfDirectory(at:RecoveryLocations.copies,includingPropertiesForKeys:nil)
-        guard (try? Data(contentsOf:current)) == corrupt || allCopies.contains(where:{ (try? Data(contentsOf:$0)) == corrupt }) else {
-            throw Failure(message:"Corrupt external bytes were not preserved")
-        }
-        guard try NoteFile.decode(Data(contentsOf:doc.fileURL!)) == local else { throw Failure(message:"Local edits lost after corrupt external write") }
+        guard doc.fileURL == source, try NoteFile.decode(Data(contentsOf:source)) == local,
+              doc.state.recoveryMessage == nil else { throw Failure(message:"Corrupt external write was not overwritten") }
         guard LightNoteDocumentController.retargetedPath(source.path,from:source,to:doc.fileURL!) == doc.fileURL!.path,
               LightNoteDocumentController.retargetedPath("/unrelated.lightnote",from:source,to:doc.fileURL!) == "/unrelated.lightnote" else {
             throw Failure(message:"Last opened file did not follow conflict copy")
         }
-        print("EXTERNAL_CONFLICT_TESTS_PASSED local-edit/notification/remote-copy/corrupt-bytes-preserved")
+        print("EXTERNAL_CONFLICT_TESTS_PASSED local-edit/notification/silent-in-place-overwrite/corrupt-bytes-replaced")
     }
 
     static func runRecoveryProcess() async throws {

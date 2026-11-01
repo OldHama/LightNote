@@ -41,8 +41,8 @@ for mode in ("--kill-before-save", "--kill-during-save", "--kill-after-temp-writ
             assert not report["unreadable"], report
             expected=json.loads((root/"expected.json").read_text())
             if mode=="--kill-after-conflict":
-                assert report["recovered"]==[], "Saved conflict fork was recovered twice"
-                assert any(json.loads(p.read_text())==expected for p in (root/"Notes").glob("*.lightnote"))
+                assert report["recovered"]==[], "Saved overwrite was recovered twice"
+                assert json.loads((root/"lesson.lightnote").read_text())==expected
                 assert (root/"lesson.lightnote").read_bytes()==original
             elif mode=="--normal-close":
                 assert report["recovered"]==[], report

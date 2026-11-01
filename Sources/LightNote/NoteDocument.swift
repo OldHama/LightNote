@@ -426,7 +426,7 @@ final class NoteDocument: NSDocument {
             guard operation == .saveOperation || operation == .autosaveInPlaceOperation,
                   let expected = self.diskDigest.withLock({ $0 }) else { completionHandler(error); return }
             // AppKit may reject an externally modified file BEFORE writeSafely.
-            // Inspect the bytes; never auto-select its destructive "Save Anyway" option.
+            // The user prefers the open document to win over external changes.
             Task { @MainActor in
                 let changed = await Task.detached {
                     guard let data = try? Data(contentsOf: url) else { return false }
@@ -434,13 +434,9 @@ final class NoteDocument: NSDocument {
                 }.value
                 guard changed else { completionHandler(error); return }
                 do {
-                    try FileManager.default.createDirectory(at: RecoveryLocations.copies, withIntermediateDirectories: true)
-                    let name = RecoveryJournal.safeName(url.deletingPathExtension().lastPathComponent)
-                    let fork = RecoveryLocations.copies.appendingPathComponent("\(name) (충돌 \(UUID().uuidString)).lightnote")
-                    try await self.saveConflictCopy(to: fork, typeName: typeName)
+                    try await self.overwriteCurrentFile(to: url, typeName: typeName)
                     self.rememberReplacement(from: previousURL)
-                    try self.journal?.retarget(to: fork)
-                    self.state.recoveryMessage = "외부 원본 유지 · 현재 편집은 충돌 사본으로 저장했습니다"
+                    try self.journal?.retarget(to: url)
                     completionHandler(nil)
                 } catch { completionHandler(error) }
             }
@@ -453,7 +449,7 @@ final class NoteDocument: NSDocument {
         let updated = LightNoteDocumentController.retargetedPath(oldPath, from: previous, to: current)
         if updated != oldPath { UserDefaults.standard.set(updated, forKey: key) }
     }
-    private func saveConflictCopy(to url: URL, typeName: String) async throws {
+    private func overwriteCurrentFile(to url: URL, typeName: String) async throws {
         try await super.save(to: url, ofType: typeName, for: .saveAsOperation)
     }
 
@@ -463,19 +459,6 @@ final class NoteDocument: NSDocument {
         writingSnapshot.withLock { $0 = snapshot }
         defer { writingSnapshot.withLock { $0 = nil } }
         unblockUserInteraction()
-        if operation == .saveOperation || operation == .autosaveInPlaceOperation,
-           let expected = diskDigest.withLock({ $0 }), FileManager.default.fileExists(atPath: url.path),
-           try diskStamp.withLock({ $0 }) != FileStamp.read(url) {
-            let external = try Data(contentsOf: url)
-            if RecoveryJournal.digest(external) != expected {
-                _ = try RecoveryLocations.preserve(external, name: url.deletingPathExtension().lastPathComponent)
-                Task { @MainActor in self.state.recoveryMessage = "외부 변경 내용을 별도 노트로 보존했습니다" }
-            }
-        }
-        // Do not mark iCloud conflicts resolved; preserve all versions first.
-        for version in NSFileVersion.unresolvedConflictVersionsOfItem(at: url) ?? [] {
-            _ = try RecoveryLocations.preserve(Data(contentsOf: version.url), name: url.deletingPathExtension().lastPathComponent)
-        }
         try super.writeSafely(to: url, ofType: typeName, for: operation)
         if operation == .saveOperation || operation == .saveAsOperation || operation == .autosaveInPlaceOperation {
             let digest = encodedDigest.withLock { $0 }
@@ -485,17 +468,9 @@ final class NoteDocument: NSDocument {
         }
     }
     nonisolated override func presentedItemDidChange() {
-        // Any external notification invalidates the metadata fast path, even if
-        // a cooperating writer deliberately restored its old modification date.
+        // Keep the open model authoritative; the next save replaces external bytes.
         diskStamp.withLock { $0 = nil }
-        Task { @MainActor in
-            guard !self.isClosed else { return }
-            // Never let automatic rereading erase uncommitted local edits.
-            if self.hasUnautosavedChanges { self.state.recoveryMessage = "외부 변경 감지 · 저장 시 양쪽 내용을 보존합니다" }
-            else { self.forwardExternalChange() }
-        }
     }
-    private func forwardExternalChange() { super.presentedItemDidChange() }
 
     nonisolated override func write(to url: URL, ofType typeName: String) throws {
         try super.write(to: url, ofType: typeName)
