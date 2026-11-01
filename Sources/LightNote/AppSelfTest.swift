@@ -616,6 +616,29 @@ enum AppSelfTest {
         try expect(doc.state.tool == .ellipse,"Command broke constrained shape tool")
         canvas.flagsChanged(with:commandFlags(false))
         doc.state.selectTool(.pen)
+        func tabletEvent(_ type: NSEvent.EventType, _ x: Double, _ y: Double,
+                         _ time: Double, pressure: Double) -> NSEvent {
+            let raw = event(type,x,y,time).cgEvent!.copy()!
+            raw.setIntegerValueField(.mouseEventSubtype,value:1)
+            raw.setDoubleValueField(.tabletEventPointPressure,value:pressure)
+            return NSEvent(cgEvent:raw)!
+        }
+        let contact = tabletEvent(.leftMouseDragged,3100,1800,1301,pressure:0.5)
+        try expect(contact.subtype == .tabletPoint && contact.pressure > 0,"Tablet fixture lost pressure")
+        begin()
+        canvas.mouseDown(with:event(.leftMouseDown,3000,1800,1300))
+        canvas.mouseDragged(with:contact)
+        canvas.mouseDragged(with:tabletEvent(.leftMouseDragged,3110,1810,1302,pressure:0))
+        canvas.mouseUp(with:event(.leftMouseUp,3120,1820,1303)); end()
+        let tabletStroke = doc.state.note.strokes.last!
+        try expect(tabletStroke.samples.count == 2 && tabletStroke.samples.last!.point == CGPoint(x:3100,y:1800),
+                   "Tablet lift appended a hover tail")
+        begin()
+        canvas.mouseDown(with:event(.leftMouseDown,3000,1800,1310))
+        canvas.mouseDragged(with:event(.leftMouseDragged,3100,1800,1311))
+        canvas.mouseUp(with:event(.leftMouseUp,3120,1820,1312)); end()
+        try expect(doc.state.note.strokes.last!.samples.last!.point == CGPoint(x:3120,y:1820),
+                   "Tablet filtering truncated an ordinary mouse endpoint")
         print("Verified: Shift pen line/press/release/mid-stroke/undo/redo/save; Q free-arrow drawing/head-selection/delete/undo/redo/save; 100 taps; 2002-sample stroke; mid-stroke save continuity; style; undo/redo; interruption; dot pixels; grid pixels/style undo/redo; stroke eraser click/sweep/undo/redo/keys; rectangle selection/move/undo/redo/save; zoom transforms/ink/eraser/reset; outer viewport grid/input/reopen; shapes/command circle/corner resize/undo/redo; laser hold/release/expiry/non-persistence; managed note automatic save/reopen; disk roundtrip; corrupt read")
         doc.updateChangeCount(.changeCleared)
         doc.close()

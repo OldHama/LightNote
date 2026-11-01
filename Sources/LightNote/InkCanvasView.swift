@@ -161,6 +161,7 @@ final class InkCanvasView: NSView {
     private let log = Logger(subsystem: "com.lightnote.app", category: "Input")
     private var diagnosticEvents = 0
     private var diagnosticTabletEvents = 0
+    private var tabletContactSeen = false
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -363,6 +364,7 @@ final class InkCanvasView: NSView {
         if state.tool == .freeArrow { active?.tool = "freeArrow" }
         liveInk = InkPathBuilder()
         diagnosticEvents = 0; diagnosticTabletEvents = 0
+        tabletContactSeen = false
         append(event)
     }
     override func mouseDragged(with event: NSEvent) {
@@ -396,7 +398,10 @@ final class InkCanvasView: NSView {
             return
         }
         guard active != nil else { return }
-        append(event)
+        // A tablet release can carry a hover position after the tip left the glass.
+        // End at the last contact sample; ordinary mouse releases keep their endpoint.
+        if !tabletContactSeen { append(event) }
+        else { constrainPen(event.modifierFlags.contains(.shift)) }
         finishStroke(reason: "up")
     }
     override func tabletPoint(with event: NSEvent) {
@@ -665,6 +670,10 @@ final class InkCanvasView: NSView {
         let point = convert(event.locationInWindow, from: nil)
         let tablet = event.type == .tabletPoint || event.subtype == .tabletPoint
         let pressure = tablet ? Double(min(1, max(0, event.pressure))) : nil
+        if let pressure {
+            if pressure == 0 && tabletContactSeen { return }
+            if pressure > 0 { tabletContactSeen = true }
+        }
         let sample = InkSample(x: point.x, y: point.y, time: event.timestamp, pressure: pressure)
         guard point.x.isFinite, point.y.isFinite else { return }
         // Out-of-order samples cannot create a backward segment. Same timestamps remain valid.
