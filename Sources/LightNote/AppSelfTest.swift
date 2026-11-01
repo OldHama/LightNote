@@ -577,6 +577,35 @@ enum AppSelfTest {
         canvas.mouseUp(with:event(.leftMouseUp,3150,1870,1233,modifiers:.shift)); end()
         try expect(doc.state.note.strokes.last!.tool == "freeArrow" && doc.state.note.strokes.last!.samples.count == 4,"Shift changed Q free arrow behavior")
         doc.state.selectTool(.pen)
+        func commandFlags(_ down: Bool) -> NSEvent {
+            let raw = CGEvent(keyboardEventSource:nil,virtualKey:55,keyDown:down)!
+            raw.type = .flagsChanged; raw.flags = down ? .maskCommand : []
+            return NSEvent(cgEvent:raw)!
+        }
+        let countBeforeCommand = doc.state.note.strokes.count
+        canvas.flagsChanged(with:commandFlags(true))
+        try expect(doc.state.tool == .selection,"Command did not temporarily select")
+        begin()
+        canvas.mouseDown(with:event(.leftMouseDown,2990,1730,1240,modifiers:.command))
+        canvas.mouseDragged(with:event(.leftMouseDragged,3160,1910,1241,modifiers:.command))
+        canvas.flagsChanged(with:commandFlags(false))
+        try expect(doc.state.tool == .selection,"Command release interrupted selection drag")
+        canvas.mouseUp(with:event(.leftMouseUp,3160,1910,1242)); end()
+        try expect(doc.state.tool == .pen && doc.state.note.strokes.count == countBeforeCommand,
+                   "Command selection failed to restore pen or added ink")
+        doc.state.selectTool(.eraser)
+        canvas.flagsChanged(with:commandFlags(true))
+        canvas.flagsChanged(with:commandFlags(false))
+        try expect(doc.state.tool == .eraser,"Command did not restore eraser")
+        doc.state.selectTool(.selection)
+        canvas.flagsChanged(with:commandFlags(true))
+        canvas.flagsChanged(with:commandFlags(false))
+        try expect(doc.state.tool == .selection,"Command changed persistent V selection")
+        doc.state.selectTool(.ellipse)
+        canvas.flagsChanged(with:commandFlags(true))
+        try expect(doc.state.tool == .ellipse,"Command broke constrained shape tool")
+        canvas.flagsChanged(with:commandFlags(false))
+        doc.state.selectTool(.pen)
         print("Verified: Shift pen line/press/release/mid-stroke/undo/redo/save; Q free-arrow drawing/head-selection/delete/undo/redo/save; 100 taps; 2002-sample stroke; mid-stroke save continuity; style; undo/redo; interruption; dot pixels; grid pixels/style undo/redo; stroke eraser click/sweep/undo/redo/keys; rectangle selection/move/undo/redo/save; zoom transforms/ink/eraser/reset; outer viewport grid/input/reopen; shapes/command circle/corner resize/undo/redo; laser hold/release/expiry/non-persistence; managed note automatic save/reopen; disk roundtrip; corrupt read")
         doc.updateChangeCount(.changeCleared)
         doc.close()

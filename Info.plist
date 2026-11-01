@@ -8,8 +8,8 @@
 <key>CFBundleName</key><string>LightNote</string>
 <key>CFBundleIconFile</key><string>AppIcon.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.10.2</string>
-<key>CFBundleVersion</key><string>20</string>
+<key>CFBundleShortVersionString</key><string>0.10.3</string>
+<key>CFBundleVersion</key><string>21</string>
 <key>LSMinimumSystemVersion</key><string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>SUFeedURL</key><string>https://github.com/OldHama/LightNote/releases/latest/download/appcast.xml</string>

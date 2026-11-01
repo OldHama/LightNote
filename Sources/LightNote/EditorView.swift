@@ -175,6 +175,7 @@ private struct ShortcutHelpView: View {
                     row("⌘ D", "선택한 획 복제")
                     row("⌫ / Delete", "선택한 획 삭제")
                     row("Esc", "선택 해제 · 도형 취소 · 도움말 닫기")
+                    row("⌘ 누르고 있기", "임시 객체 선택 (도형 도구 제외)")
                     row("⌘ ,", "환경설정")
                     row("⌘ N", "새 노트")
                     row("⌘ O", "노트 열기")

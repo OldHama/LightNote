@@ -141,6 +141,7 @@ final class InkCanvasView: NSView {
     private var moveStart: CGPoint?
     private var moveDelta = CGSize.zero
     private var active: InkStroke?
+    private var commandPreviousTool: InkTool?
     private var penIsStraight = false
     var displayedStroke: InkStroke? {
         guard let active else { return nil }
@@ -263,7 +264,32 @@ final class InkCanvasView: NSView {
                 name: NSWindow.didResignKeyNotification, object: newWindow)
         }
     }
-    @objc private func windowResigned() { finishStroke(reason: "window-inactive") }
+    @objc private func windowResigned() {
+        finishStroke(reason: "window-inactive")
+        updateCommandSelection(false)
+    }
+    private var inputInProgress: Bool {
+        active != nil || shapeDraft != nil || activeLaser != nil || erasingLast != nil ||
+        marqueeStart != nil || moveStart != nil || resizeDrag != nil
+    }
+    private func updateCommandSelection(_ held: Bool) {
+        guard !inputInProgress else { return }
+        if held {
+            guard commandPreviousTool == nil, state.tool != .selection else { return }
+            // These tools already use Command for constrained shapes.
+            guard state.tool != .ellipse, state.tool != .rectangle, state.tool != .arrow else { return }
+            commandPreviousTool = state.tool
+            state.selectTool(.selection)
+        } else if let previous = commandPreviousTool {
+            commandPreviousTool = nil
+            // A deliberate tool change (for example paste) takes precedence.
+            if state.tool == .selection {
+                state.tool = previous
+                refreshToolCursor()
+                needsDisplay = true
+            }
+        }
+    }
     override func viewDidChangeBackingProperties() {
         finishStroke(reason: "display-change")
         super.viewDidChangeBackingProperties()
@@ -283,6 +309,7 @@ final class InkCanvasView: NSView {
         guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
         focusForDrawing()
         finishStroke(reason: "new-down")
+        updateCommandSelection(event.modifierFlags.contains(.command))
         if state.tool == .ellipse || state.tool == .rectangle || state.tool == .arrow {
             let point = convert(event.locationInWindow, from: nil)
             shapeDraft = ShapeDraft(kind: state.tool == .ellipse ? .ellipse : (state.tool == .arrow ? .arrow : .rectangle),
@@ -344,6 +371,7 @@ final class InkCanvasView: NSView {
         append(event)
     }
     override func mouseUp(with event: NSEvent) {
+        defer { updateCommandSelection(event.modifierFlags.contains(.command)) }
         if shapeDraft != nil {
             updateShape(with: event)
             finishStroke(reason: "shape-up")
@@ -467,6 +495,7 @@ final class InkCanvasView: NSView {
         } else if !old.isNull { setNeedsDisplay(old) }
     }
     override func flagsChanged(with event: NSEvent) {
+        updateCommandSelection(event.modifierFlags.contains(.command))
         constrainPen(event.modifierFlags.contains(.shift))
         if shapeDraft != nil {
             let old = shapeDraft?.stroke?.bounds ?? .null
