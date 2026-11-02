@@ -201,3 +201,9 @@
 
 - Library, Save, Help, Undo and Redo now use a shared rounded hover background and darker pressed background, with at least 40x44pt targets. Disabled history actions are dimmed and do not highlight; Reduce Motion removes custom transitions. Actions and shortcuts are unchanged.
 - Signed universal release on arm64: TOOLBAR_HIT_TEST_PASSED on retry. Initial synthetic toolbar run missed an existing eraser corner click; unchanged retry passed. The existing test covers drawing/color corner clicks and tooltips, not a dedicated animation capture for these five newly styled actions. No new tests were added for this visual-only style.
+
+## v0.15.18 — moving palette glass droplet
+
+- A single non-hit-testing droplet lens follows the hovered color, settles on the selected preset on exit, and springs to a newly selected color. Hover only changes presentation; it never assigns the pen color. Native clear glass on macOS 26+ refracts the swatch with a thin highlight; fallback uses an outline without covering pigments. Custom colors outside the presets have no resting lens.
+- Lens position uses the existing 44pt preset geometry, with mild hover stretch. Reduce Motion disables the springs/stretch and Reduce Transparency uses the outline fallback. Existing selected-color ring is retained.
+- Signed universal release on arm64: TOOLBAR_HIT_TEST_PASSED (tool/color corner clicks and tooltip regressions). Live isolated preview captured with blue resting lens; clicking Red visibly moved the lens to Red and retained readable swatches. Hover-only movement/animation timing and older OS/accessibility fallback were not separately captured.

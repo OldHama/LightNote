@@ -161,6 +161,12 @@ struct DrawingToolStrip: View {
 struct ColorPresetStrip: View {
     @ObservedObject var state: NoteState
     @ObservedObject private var preferences = AppPreferences.shared
+    @State private var hoveredKey: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var dropletIndex: Int? {
+        if let hoveredKey, let index = preferences.colorPresets.firstIndex(where: { $0.key == hoveredKey }) { return index }
+        return preferences.colorPresets.firstIndex(where: { $0.color == state.color })
+    }
     var body: some View {
         HStack(spacing: 0) {
             ForEach(preferences.colorPresets, id: \.key) { preset in
@@ -175,8 +181,42 @@ struct ColorPresetStrip: View {
                 .buttonStyle(DrawingToolButtonStyle(tint: .accentColor,selected:state.color == preset.color))
                 .topTooltip(preset.name + " · " + preset.key)
                 .accessibilityLabel(preset.name + " 펜")
+                .onHover { inside in
+                    if inside { hoveredKey = preset.key }
+                    else if hoveredKey == preset.key { hoveredKey = nil }
+                }
             }
         }.modifier(ToolbarGlassGroup())
+        .overlay(alignment:.leading) {
+            if let index = dropletIndex {
+                PaletteDroplet()
+                    .frame(width:38,height:38)
+                    .scaleEffect(x:reduceMotion ? 1 : (hoveredKey == nil ? 1 : 1.12),
+                                 y:reduceMotion ? 1 : (hoveredKey == nil ? 1 : 1.04))
+                    .offset(x:CGFloat(index)*44+3)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .animation(reduceMotion ? nil : .spring(response:0.32,dampingFraction:0.68),value:dropletIndex)
+        .animation(reduceMotion ? nil : .spring(response:0.24,dampingFraction:0.72),value:hoveredKey != nil)
+    }
+}
+
+private struct PaletteDroplet: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    var body: some View {
+        surface.overlay(Capsule().strokeBorder(
+            LinearGradient(colors:[.white.opacity(0.85), .white.opacity(0.08), .white.opacity(0.5)],
+                           startPoint:.topLeading,endPoint:.bottomTrailing),lineWidth:1))
+            .shadow(color:Color.accentColor.opacity(0.24),radius:5,y:1)
+    }
+    @ViewBuilder private var surface: some View {
+        if #available(macOS 26.0, *), !reduceTransparency {
+            Capsule().fill(.clear).glassEffect(.clear,in:Capsule())
+        } else {
+            Capsule().strokeBorder(Color.accentColor.opacity(0.7),lineWidth:2)
+        }
     }
 }
 
