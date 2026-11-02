@@ -85,8 +85,8 @@ public struct InkStroke: Codable, Equatable, Sendable, Identifiable {
             minX = min(minX, point.x); maxX = max(maxX, point.x)
             minY = min(minY, point.y); maxY = max(maxY, point.y)
         }
-        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
-            .insetBy(dx: -width / 2 - 2, dy: -width / 2 - 2)
+        let rect = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+        return tool == "image" ? rect : rect.insetBy(dx: -width / 2 - 2, dy: -width / 2 - 2)
     }
 }
 

@@ -808,7 +808,7 @@ final class InkCanvasView: NSView {
             }
         }
         if let rect = marqueeRect, marqueeStart != nil {
-            selectedIDs = Set(state.note.strokes.filter { stroke in
+            let candidates = state.note.strokes.filter { stroke in
                 guard stroke.bounds.intersects(rect) else { return false }
                 if stroke.tool == "image" { return true }
                 let points = cache[stroke.id]?.points ?? InkPathBuilder.make(stroke: stroke).points
@@ -818,7 +818,9 @@ final class InkCanvasView: NSView {
                 return (0..<4).contains { index in
                     stroke.intersectsEraser(from: corners[index], to: corners[(index+1)%4], radius: 0, polyline: points)
                 }
-            }.map(\.id))
+            }
+            let editable = candidates.filter { !$0.isLocked }
+            selectedIDs = Set((editable.isEmpty ? candidates : editable).map(\.id))
             state.hasSelection = !selectedIDs.isEmpty
             marqueeStart = nil; marqueeRect = nil
             setNeedsDisplay(rect.insetBy(dx: -10, dy: -10))

@@ -140,12 +140,19 @@ final class NoteLibrary: ObservableObject {
         try FileManager.default.createDirectory(at:url,withIntermediateDirectories:false)
         refresh()
     }
-    func createNote() async throws {
+    enum Template { case blank, studentConsultation }
+    func createNote(template: Template = .blank) async throws {
         let note = NoteDocument()
+        if template == .studentConsultation {
+            note.state.note = try StudentConsultationTemplate.makeNote()
+            try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
+            note.fileURL = uniqueURL(name:"학생 신규 상담",directory:directory)
+        }
         NSDocumentController.shared.addDocument(note)
         do {
-            note.makeWindowControllers()
             try await note.persistLatest(directory:directory)
+            note.state.refresh()
+            note.makeWindowControllers()
             note.showWindows(); refresh()
         } catch { note.updateChangeCount(.changeCleared); note.close(); throw error }
     }
@@ -264,6 +271,7 @@ struct NoteLibraryView: View {
     @State private var name = ""
     @State private var deleting: NoteLibrary.Card?
     private func run(_ operation: @escaping @MainActor () async throws -> Void) {
+        guard !library.busy else { return }
         library.busy = true
         Task { do { try await operation() } catch { library.errorMessage = error.localizedDescription }; library.busy = false }
     }
@@ -276,6 +284,7 @@ struct NoteLibraryView: View {
                 Button { library.refresh() } label: { Image(systemName:"arrow.clockwise") }.help("새로고침")
                 Menu {
                     Button("새 노트") { run { try await library.createNote() } }
+                    Button("학생 신규 상담 · A4 세로") { run { try await library.createNote(template:.studentConsultation) } }
                     Button("새 폴더") { name = ""; creatingFolder = true }
                 } label: {
                     Label("신규",systemImage:"plus").padding(.horizontal,14).padding(.vertical,8)

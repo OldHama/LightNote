@@ -186,3 +186,12 @@ extension InkTests {
         XCTAssertEqual(decoded.strokes[0],stroke)
     }
 }
+
+
+extension InkTests {
+    func testImageBoundsMatchPaperWithoutInkPadding() {
+        var image = InkStroke(samples:[InkSample(x:0,y:0,time:0),InkSample(x:595.275590551,y:841.88976378,time:0)])
+        image.tool = "image"
+        XCTAssertEqual(image.bounds,CGRect(x:0,y:0,width:595.275590551,height:841.88976378))
+    }
+}

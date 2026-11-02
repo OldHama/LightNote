@@ -1502,6 +1502,48 @@ extension AppSelfTest {
         try expect(newCard.url.deletingLastPathComponent().path == lesson.path && NSDocumentController.shared.document(for:newCard.url) != nil,
                    "New note was not created/opened in current folder")
         try await library.delete(newCard)
+        try await library.createNote(template:.studentConsultation)
+        guard let consultationCard = library.cards.first(where:{$0.name == "학생 신규 상담"}),
+              let consultation = NSDocumentController.shared.document(for:consultationCard.url) as? NoteDocument else {
+            throw Failure(message:"Consultation template note was not created/opened")
+        }
+        try expect(consultationCard.url.deletingLastPathComponent().path == lesson.path,"Consultation note ignored selected folder")
+        let form = consultation.state.note
+        try expect(abs(form.pageWidth*25.4/72-210) < 0.00001 && abs(form.pageHeight*25.4/72-297) < 0.00001 && form.paperStyle == .blank,
+                   "Consultation template is not portrait A4")
+        try expect(form.strokes.count == 1 && form.strokes[0].tool == "image" && form.strokes[0].isLocked,"Consultation background not locked")
+        let consultationCanvas = InkCanvasView(state:consultation.state)
+        try expect(consultationCanvas.frame.height == form.pageHeight && consultation.state.workspacePageCount == 1,"Consultation template created a spurious page")
+        try form.strokes[0].imagePNG!.write(to:URL(fileURLWithPath:"/tmp/lightnote-student-consultation.png"))
+        consultation.undoManager?.groupsByEvent = false
+        consultation.undoManager?.beginUndoGrouping()
+        consultation.append(InkStroke(samples:[InkSample(x:80,y:160,time:1),InkSample(x:160,y:160,time:2)]))
+        consultation.undoManager?.endUndoGrouping()
+        consultation.eraseStrokes(ids:[form.strokes[0].id])
+        try expect(consultation.state.note.strokes.count == 2,"Form background erased while writing")
+        consultation.state.selectTool(.selection)
+        func formSelectionEvent(_ type:NSEvent.EventType,_ point:CGPoint,_ time:Double) -> NSEvent {
+            NSEvent.mouseEvent(with:type,location:consultationCanvas.convert(point,to:nil),modifierFlags:[],timestamp:time,
+                windowNumber:0,context:nil,eventNumber:0,clickCount:1,pressure:0)!
+        }
+        consultationCanvas.mouseDown(with:formSelectionEvent(.leftMouseDown,CGPoint(x:70,y:150),1600))
+        consultationCanvas.mouseDragged(with:formSelectionEvent(.leftMouseDragged,CGPoint(x:170,y:170),1601))
+        consultationCanvas.mouseUp(with:formSelectionEvent(.leftMouseUp,CGPoint(x:170,y:170),1602))
+        let formSelectionBoard = NSPasteboard(name:NSPasteboard.Name("LightNote-form-selection-"+UUID().uuidString))
+        try expect(consultationCanvas.copySelection(to:formSelectionBoard),"Consultation writing could not be selected")
+        let selectedWriting = try NoteFile.decode(formSelectionBoard.data(forType:InkCanvasView.inkPasteboardType)!)
+        try expect(selectedWriting.strokes.count == 1 && selectedWriting.strokes[0].tool == "pen","Locked form interfered with handwriting selection")
+        consultation.undoInk(nil)
+        try expect(consultation.state.note == form,"Undo removed consultation form")
+        consultation.redoInk(nil)
+        try await consultation.persistLatest()
+        let savedConsultation = try NoteFile.decode(Data(contentsOf:consultationCard.url))
+        try expect(savedConsultation == consultation.state.note,"Consultation writing did not save")
+        try await library.createNote(template:.studentConsultation)
+        let otherConsultation = library.cards.first{$0.name == "학생 신규 상담 2"}!
+        try expect(otherConsultation.id != consultationCard.id,"Consultation template reused existing note")
+        try await library.delete(otherConsultation)
+        try await library.delete(consultationCard)
         let duplicated = try await library.duplicate(card)
         let duplicatedContent = try NoteFile.decode(Data(contentsOf:duplicated))
         try expect(duplicatedContent == content,"Library duplicate changed content")
