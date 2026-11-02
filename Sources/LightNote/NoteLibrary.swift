@@ -334,7 +334,7 @@ struct NoteLibraryView: View {
                                     Image(systemName:library.favorites.contains(card.id) ? "star.fill" : "star")
                                         .foregroundStyle(library.favorites.contains(card.id) ? Color.orange : Color.secondary)
                                         .padding(7).background(.regularMaterial,in:Circle())
-                                }.buttonStyle(.plain).padding(5).accessibilityLabel("즐겨찾기 변경")
+                                }.buttonStyle(FavoriteStarButtonStyle()).padding(5).accessibilityLabel("즐겨찾기 변경")
                             }
                             Text(card.name).font(.headline).lineLimit(2).multilineTextAlignment(.center)
                             Text(card.unreadable ? "읽을 수 없는 노트" : card.modified.formatted(date:.abbreviated,time:.shortened))
@@ -502,5 +502,22 @@ private struct LibraryCardHover: NSViewRepresentable {
         override func mouseEntered(with event:NSEvent) { report(true) }
         override func mouseMoved(with event:NSEvent) { report(true) }
         override func mouseExited(with event:NSEvent) { report(false) }
+    }
+}
+
+private struct FavoriteStarButtonStyle: ButtonStyle {
+    func makeBody(configuration:Configuration) -> some View { Star(configuration:configuration) }
+    private struct Star: View {
+        let configuration: ButtonStyle.Configuration
+        @State private var hovering = false
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        var body: some View {
+            configuration.label
+                .scaleEffect(reduceMotion ? 1 : (configuration.isPressed ? 0.96 : (hovering ? 1.12 : 1)))
+                .contentShape(Circle())
+                .onHover { hovering = $0 }
+                .animation(reduceMotion ? nil : .spring(response:0.24,dampingFraction:0.75),value:hovering)
+                .animation(reduceMotion ? nil : .easeOut(duration:0.1),value:configuration.isPressed)
+        }
     }
 }

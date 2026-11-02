@@ -185,3 +185,8 @@
 - Hovering a note card highlights its thumbnail border and adds an accent-colored glow plus subtle background across the thumbnail/title/date area. The effect fades over 160ms unless Reduce Motion is enabled. Ink previews are not washed out by an overlay.
 - Transparent native tracking views use activeAlways/inVisibleRect mouse-entry/exit/move tracking for the complete card and return nil from hitTest, preserving open/favorite/context-menu behavior. This also supports libraries that are not the keyboard-active window.
 - Signed universal release on arm64: NOTE_LIBRARY_TEST_PASSED, including full-card native tracker geometry assertions and direct fixture mouseEntered/mouseExited delivery. Inspected /tmp/lightnote-library-hover.png: blue border/glow/background appeared on one card, neighboring card remained neutral. Computer-use click probes did not reliably deliver hover entry, so physical pointer movement is not claimed as verified by those probes. Existing creation/open auto-dismiss and folder/rename/save regressions passed.
+
+## v0.15.15 — favorite star hover motion
+
+- Favorite buttons scale to 1.12 on hover with a short spring and 0.96 while pressed, returning to 1 on exit. Reduce Motion keeps scale at 1 without animation. Favorite toggle/action and surrounding card layout are unchanged.
+- Signed universal release on arm64: NOTE_LIBRARY_TEST_PASSED. Native hover animation timing was not separately captured; no new tests were added for this visual-only style.
