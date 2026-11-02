@@ -283,14 +283,6 @@ struct NoteLibraryView: View {
                 Spacer()
                 if library.loading { ProgressView().controlSize(.small) }
                 Button { library.refresh() } label: { Image(systemName:"arrow.clockwise") }.help("새로고침")
-                Menu {
-                    Button("새 노트") { run { try await library.createNote() } }
-                    Button("학생 신규 상담 · A4 세로") { run { try await library.createNote(template:.studentConsultation) } }
-                    Button("새 폴더") { name = ""; creatingFolder = true }
-                } label: {
-                    Label("신규",systemImage:"plus").padding(.horizontal,14).padding(.vertical,8)
-                        .foregroundStyle(.white).background(Color.accentColor,in:Capsule())
-                }.menuStyle(.borderlessButton).fixedSize()
             }.padding(24)
             HStack(spacing:14) {
                 if library.directory.path != library.root.path {
@@ -354,7 +346,12 @@ struct NoteLibraryView: View {
                             Button("휴지통으로 이동…",role:.destructive) { deleting = card }
                         }
                     }
-                    Button { run { try await library.createNote() } } label: {
+                    Menu {
+                        Button("새 노트") { run { try await library.createNote() } }
+                        Button("학생 신규 상담 · A4 세로") { run { try await library.createNote(template:.studentConsultation) } }
+                        Divider()
+                        Button("새 폴더") { name = ""; creatingFolder = true }
+                    } label: {
                         VStack(spacing:10) {
                             RoundedRectangle(cornerRadius:7)
                                 .fill(Color.accentColor.opacity(newNoteHovered ? 0.16 : 0.05))
@@ -365,13 +362,13 @@ struct NoteLibraryView: View {
                                 }
                                 .overlay { Image(systemName:"plus").font(.system(size:44,weight:.light)).foregroundStyle(Color.accentColor) }
                                 .frame(width:140,height:190)
-                            Text("새 노트").font(.headline).foregroundStyle(.primary)
+                            Text("신규").font(.headline).foregroundStyle(.primary)
                             Text("클릭하여 만들기").font(.caption).foregroundStyle(.secondary)
                         }.frame(maxWidth:.infinity).contentShape(Rectangle())
-                    }.buttonStyle(.plain)
+                    }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
                         .onHover { newNoteHovered = $0 }
-                        .help("현재 폴더에 새 노트 만들기")
-                        .accessibilityLabel("새 노트 만들기")
+                        .help("새 노트 · 학생 상담 양식 · 새 폴더")
+                        .accessibilityLabel("신규 문서 또는 폴더 만들기")
                         .accessibilityIdentifier("library-new-note-card")
                 }.padding(24)
                 if library.visibleCards.isEmpty && library.visibleFolders.isEmpty {

@@ -152,3 +152,8 @@
 - Subfolder breadcrumb/back navigation and favorites filtering remain connected to the existing library state.
 - Signed universal release on arm64: NOTE_LIBRARY_TEST_PASSED. Rendered and visually inspected dark/all, dark/favorites and light/all views; light/favorites also rendered. Legacy OS/material fallback and accessibility system settings were compiled but not run on a separate system. Screenshot rendering is static, not proof of live animation timing.
 - Apple API reference: https://developer.apple.com/documentation/swiftui/applying-liquid-glass-to-custom-views
+
+## v0.15.10 — relocate New menu into library card
+
+- Removed the top-right New menu. The grid's plus card now opens its three existing actions: new blank note, portrait A4 student consultation, and new folder. Uses button menu style so the full custom card label remains visible; native borderless menu style collapsed it to text during visual QA and was corrected.
+- Debug and signed universal release on arm64: NOTE_LIBRARY_TEST_PASSED; inspected rendered library with upper control absent and full-size card retained. Document/template/folder creation operations are unchanged. Menu pop-up interaction was not independently automated.
