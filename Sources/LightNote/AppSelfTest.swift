@@ -1485,6 +1485,20 @@ extension AppSelfTest {
             }
         }
 
+        // A palette drag must commit the release segment, not the original button.
+        state.color = .blue
+        let dragTime = ProcessInfo.processInfo.systemUptime
+        func paletteEvent(_ type:NSEvent.EventType,_ x:CGFloat,_ time:Double) -> NSEvent {
+            NSEvent.mouseEvent(with:type,location:CGPoint(x:x,y:29),modifierFlags:[],timestamp:time,
+                windowNumber:window.windowNumber,context:nil,eventNumber:0,clickCount:1,pressure:type == .leftMouseUp ? 0 : 1)!
+        }
+        NSApp.postEvent(paletteEvent(.leftMouseUp,154,dragTime+0.08),atStart:true)
+        NSApp.postEvent(paletteEvent(.leftMouseDragged,154,dragTime+0.06),atStart:true)
+        NSApp.postEvent(paletteEvent(.leftMouseDragged,100,dragTime+0.03),atStart:true)
+        NSApp.sendEvent(paletteEvent(.leftMouseDown,66,dragTime))
+        try await Task.sleep(for:.milliseconds(150))
+        guard state.color == .green else { throw Failure(message:"Palette drag did not commit the release color") }
+
         if CommandLine.arguments.contains("--glass-preview") {
             state.selectTool(.selection); state.color = .blue
             window.title = "도구·색상 유리 버튼 검사"

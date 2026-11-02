@@ -162,6 +162,8 @@ struct ColorPresetStrip: View {
     @ObservedObject var state: NoteState
     @ObservedObject private var preferences = AppPreferences.shared
     @State private var hoveredKey: String?
+    @State private var suppressClick = false
+    @GestureState private var dragLocation: CGFloat?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var dropletIndex: Int? {
         if let hoveredKey, let index = preferences.colorPresets.firstIndex(where: { $0.key == hoveredKey }) { return index }
@@ -170,7 +172,7 @@ struct ColorPresetStrip: View {
     var body: some View {
         HStack(spacing: 0) {
             ForEach(preferences.colorPresets, id: \.key) { preset in
-                Button { state.color = preset.color } label: {
+                Button { if !suppressClick { state.color = preset.color } } label: {
                     Circle().fill(Color(cgColor: preset.color.cgColor))
                         .frame(width: 19, height: 19)
                         .padding(4)
@@ -182,24 +184,44 @@ struct ColorPresetStrip: View {
                 .topTooltip(preset.name + " · " + preset.key)
                 .accessibilityLabel(preset.name + " 펜")
                 .onHover { inside in
+                    guard dragLocation == nil else { return }
                     if inside { hoveredKey = preset.key }
                     else if hoveredKey == preset.key { hoveredKey = nil }
                 }
             }
         }.modifier(ToolbarGlassGroup())
+        .coordinateSpace(name:"palette-drag")
+        .simultaneousGesture(DragGesture(minimumDistance:3,coordinateSpace:.named("palette-drag"))
+            .updating($dragLocation) { value, location, transaction in
+                transaction.animation = nil
+                location = min(max(value.location.x,22),CGFloat(preferences.colorPresets.count)*44-22)
+            }
+            .onChanged { _ in suppressClick = true }
+            .onEnded { value in
+                let index = min(max(Int(floor(value.location.x/44)),0),preferences.colorPresets.count-1)
+                withAnimation(reduceMotion ? nil : .spring(response:0.28,dampingFraction:0.72)) {
+                    state.color = preferences.colorPresets[index].color
+                    hoveredKey = nil
+                }
+                DispatchQueue.main.async { suppressClick = false }
+            })
+        .onChange(of:dragLocation == nil) { _, released in
+            if released { DispatchQueue.main.async { suppressClick = false } }
+        }
         .overlay(alignment:.leading) {
-            if let index = dropletIndex {
+            if let center = dragLocation ?? dropletIndex.map({ CGFloat($0)*44+22 }) {
                 PaletteDroplet()
                     .frame(width:38,height:38)
-                    .scaleEffect(x:reduceMotion ? 1 : (hoveredKey == nil ? 1 : 1.12),
-                                 y:reduceMotion ? 1 : (hoveredKey == nil ? 1 : 1.04))
-                    .offset(x:CGFloat(index)*44+3)
+                    .scaleEffect(x:reduceMotion ? 1 : (dragLocation != nil ? 1.32 : (hoveredKey == nil ? 1 : 1.06)),
+                                 y:reduceMotion ? 1 : (dragLocation != nil ? 1.22 : 1))
+                    .offset(x:center-19)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
         }
         .animation(reduceMotion ? nil : .spring(response:0.32,dampingFraction:0.68),value:dropletIndex)
         .animation(reduceMotion ? nil : .spring(response:0.24,dampingFraction:0.72),value:hoveredKey != nil)
+        .animation(reduceMotion ? nil : .spring(response:0.28,dampingFraction:0.72),value:dragLocation == nil)
     }
 }
 
