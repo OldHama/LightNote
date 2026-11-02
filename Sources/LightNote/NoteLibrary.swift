@@ -64,9 +64,7 @@ final class NoteLibrary: ObservableObject {
         if !favorites.insert(url.path).inserted { favorites.remove(url.path) }
         defaults.set(Array(favorites),forKey:"LightNoteFavoriteNotes")
     }
-    func refresh() {
-        renderTask?.cancel()
-        let token = UUID(); generation = token
+    func refresh(onlyIfChanged: Bool = false) {
         do {
             try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
             var files = Set<URL>(); var directories: [URL] = []
@@ -83,12 +81,18 @@ final class NoteLibrary: ObservableObject {
                 for document in NSDocumentController.shared.documents { if let url = document.fileURL { files.insert(url.standardizedFileURL) } }
             }
             let previous = Dictionary(uniqueKeysWithValues:cards.map { ($0.id,$0) })
-            cards = files.compactMap { url in
+            let nextCards = files.compactMap { url -> Card? in
                 guard let values = try? url.resourceValues(forKeys:[.contentModificationDateKey,.isRegularFileKey]), values.isRegularFile == true else { return nil }
                 let date = values.contentModificationDate ?? .distantPast
                 return Card(url:url,modified:date,preview:previous[url.path]?.modified == date ? previous[url.path]?.preview : nil)
             }
-            folders = directories.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+            let nextFolders = directories.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+            if onlyIfChanged, nextCards.count == cards.count, nextFolders == folders,
+               nextCards.allSatisfy({ previous[$0.id]?.modified == $0.modified }),
+               FileManager.default.fileExists(atPath:directory.path) { return }
+            renderTask?.cancel()
+            let token = UUID(); generation = token
+            cards = nextCards; folders = nextFolders
             if !FileManager.default.fileExists(atPath:directory.path) { directory = root }
             let jobs = cards
             let paper = AppPreferences.shared.paperColor
@@ -252,6 +256,7 @@ final class NoteLibrary: ObservableObject {
 final class NoteLibraryWindowController: NSWindowController, NSWindowDelegate {
     static let shared = NoteLibraryWindowController()
     private let library: NoteLibrary
+    private var refreshTimer: Timer?
     init(library: NoteLibrary = .shared) {
         self.library = library
         let window = NSWindow(contentRect:NSRect(x:0,y:0,width:980,height:680),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
@@ -262,10 +267,26 @@ final class NoteLibraryWindowController: NSWindowController, NSWindowDelegate {
         library.didOpenNote = { [weak self] in self?.close() }
     }
     required init?(coder:NSCoder) { fatalError("init(coder:) has not been implemented") }
-    func windowDidBecomeKey(_ notification: Notification) { library.refresh() }
+    func windowDidBecomeKey(_ notification: Notification) { if !library.busy { library.refresh() } }
+    private func startMonitoring() {
+        guard refreshTimer == nil else { return }
+        let timer = Timer(timeInterval:5,repeats:true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.window?.isVisible == true, self.window?.isMiniaturized == false,
+                      !self.library.busy else { return }
+                self.library.refresh(onlyIfChanged:true)
+            }
+        }
+        refreshTimer = timer
+        RunLoop.main.add(timer,forMode:.common)
+    }
+    private func stopMonitoring() { refreshTimer?.invalidate(); refreshTimer = nil }
+    func windowWillClose(_ notification: Notification) { stopMonitoring() }
+    override func close() { stopMonitoring(); super.close() }
     func present() {
         let alreadyKey = window?.isKeyWindow == true
         showWindow(nil); window?.makeKeyAndOrderFront(nil)
+        startMonitoring()
         if alreadyKey { library.refresh() }
     }
 }
@@ -290,7 +311,6 @@ struct NoteLibraryView: View {
                 Label("노트 보관함",systemImage:"square.grid.2x2").font(.title.bold())
                 Spacer()
                 if library.loading { ProgressView().controlSize(.small) }
-                Button { library.refresh() } label: { Image(systemName:"arrow.clockwise") }.help("새로고침")
             }.padding(24)
             HStack(spacing:14) {
                 if library.directory.path != library.root.path {

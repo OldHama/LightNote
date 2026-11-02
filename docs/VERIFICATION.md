@@ -190,3 +190,9 @@
 
 - Favorite buttons scale to 1.12 on hover with a short spring and 0.96 while pressed, returning to 1 on exit. Reduce Motion keeps scale at 1 without animation. Favorite toggle/action and surrounding card layout are unchanged.
 - Signed universal release on arm64: NOTE_LIBRARY_TEST_PASSED. Native hover animation timing was not separately captured; no new tests were added for this visual-only style.
+
+## v0.15.16 — automatic library file checks
+
+- Removed the refresh button. The library controller starts one five-second common-run-loop timer when presented, scans while visible/non-minimized and not busy, and invalidates the timer on window close. Reopening performs the usual immediate scan and restarts monitoring.
+- Periodic refresh compares note paths/modification dates and folder paths before canceling preview work or publishing view changes. Unchanged scans leave cards/previews untouched; changed files/folders trigger the existing refresh path. Scans can run while preview rendering is underway; mutations defer that tick.
+- Signed universal release on arm64: NOTE_LIBRARY_TEST_PASSED. A file written directly to the isolated current folder was discovered by the actual five-second timer (no explicit refresh), an unchanged scan emitted zero objectWillChange notifications, and a file added after closing remained undiscovered after 5.3 seconds. Existing document auto-dismiss/reopen, template and hover-render regressions passed. No real multi-device iCloud synchronization test was performed.

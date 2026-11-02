@@ -1559,6 +1559,12 @@ extension AppSelfTest {
         library.refresh(); await library.waitForPreviews()
         try expect(library.cards.count == 3 && library.cards.filter{!$0.unreadable}.allSatisfy{$0.preview != nil},"Library scan/previews failed")
         try expect(library.cards.first{$0.url == broken}!.unreadable,"Corrupt note was not marked")
+        var unchangedNotifications = 0
+        let unchangedObserver = library.objectWillChange.sink { unchangedNotifications += 1 }
+        library.refresh(onlyIfChanged:true)
+        unchangedObserver.cancel()
+        try expect(unchangedNotifications == 0,"Unchanged periodic scan republished the library")
+
         library.query = "ALPHA"
         try expect(library.visibleCards.count == 1,"Library case-insensitive search failed")
         library.query = ""; library.sort = .name
@@ -1582,8 +1588,23 @@ extension AppSelfTest {
         let libraryController = NoteLibraryWindowController(library:library)
         defer { libraryController.close() }
         libraryController.present()
+        let detectedURL = lesson.appendingPathComponent("자동 감지.lightnote")
+        try content.encoded().write(to:detectedURL)
+        for _ in 0..<160 {
+            if library.cards.contains(where: { $0.url == detectedURL }) { break }
+            try await Task.sleep(for:.milliseconds(50))
+        }
+        try expect(library.cards.contains(where: { $0.url == detectedURL }),"Five-second library scan missed a new file")
+        try FileManager.default.removeItem(at:detectedURL)
+        library.refresh(); await library.waitForPreviews()
         try await library.createNote()
         try expect(libraryController.window?.isVisible == false,"Library stayed open after creating a note")
+        let hiddenURL = lesson.appendingPathComponent("닫힌 보관함 감지 검사.lightnote")
+        try content.encoded().write(to:hiddenURL)
+        try await Task.sleep(for:.milliseconds(5300))
+        try expect(!library.cards.contains(where: { $0.url == hiddenURL }),"Closed library continued polling")
+        try FileManager.default.removeItem(at:hiddenURL)
+
         guard let newCard = library.cards.first(where:{$0.name.hasPrefix("새 노트")}) else { throw Failure(message:"New note missing from library") }
         try expect(newCard.url.deletingLastPathComponent().path == lesson.path && NSDocumentController.shared.document(for:newCard.url) != nil,
                    "New note was not created/opened in current folder")
