@@ -179,3 +179,9 @@
 - Live isolated toolbar preview inspected with computer-use capture: native glass is applied to the whole button label so the material does not blur/occlude foreground icons or swatches. An initial background-only implementation visibly blurred them and was corrected before delivery.
 - Signed universal release on arm64: TOOLBAR_HIT_TEST_PASSED (16 tool-corner and 20 color-corner clicks, tooltip placement/dismissal and sticker UI regressions). Real display contrast checked in dark mode; fallback OS and accessibility settings compiled but not separately run. No physical Pencil test needed for this toolbar-only change.
 - --self-test --toolbar-self-test --glass-preview retains a temporary tools/palette fixture for live inspection.
+
+## v0.15.14 — library note hover illumination
+
+- Hovering a note card highlights its thumbnail border and adds an accent-colored glow plus subtle background across the thumbnail/title/date area. The effect fades over 160ms unless Reduce Motion is enabled. Ink previews are not washed out by an overlay.
+- Transparent native tracking views use activeAlways/inVisibleRect mouse-entry/exit/move tracking for the complete card and return nil from hitTest, preserving open/favorite/context-menu behavior. This also supports libraries that are not the keyboard-active window.
+- Signed universal release on arm64: NOTE_LIBRARY_TEST_PASSED, including full-card native tracker geometry assertions and direct fixture mouseEntered/mouseExited delivery. Inspected /tmp/lightnote-library-hover.png: blue border/glow/background appeared on one card, neighboring card remained neutral. Computer-use click probes did not reliably deliver hover entry, so physical pointer movement is not claimed as verified by those probes. Existing creation/open auto-dismiss and folder/rename/save regressions passed.

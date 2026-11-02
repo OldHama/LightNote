@@ -273,6 +273,8 @@ final class NoteLibraryWindowController: NSWindowController, NSWindowDelegate {
 struct NoteLibraryView: View {
     @ObservedObject var library: NoteLibrary
     @State private var newNoteHovered = false
+    @State private var hoveredNote: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var naming: NoteLibrary.Card?
     @State private var creatingFolder = false
     @State private var name = ""
@@ -325,6 +327,8 @@ struct NoteLibraryView: View {
                                     }.frame(width:140,height:190).clipShape(RoundedRectangle(cornerRadius:7))
                                         .overlay(RoundedRectangle(cornerRadius:7).strokeBorder(Color.primary.opacity(0.12)))
                                         .shadow(color:.black.opacity(0.12),radius:4,y:2)
+                                        .overlay(RoundedRectangle(cornerRadius:7).strokeBorder(Color.accentColor.opacity(hoveredNote == card.id ? 0.9 : 0),lineWidth:2))
+                                        .shadow(color:Color.accentColor.opacity(hoveredNote == card.id ? 0.38 : 0),radius:12,y:0)
                                 }.buttonStyle(.plain).accessibilityLabel(card.name + " 열기")
                                 Button { library.toggleFavorite(card.url) } label: {
                                     Image(systemName:library.favorites.contains(card.id) ? "star.fill" : "star")
@@ -336,6 +340,17 @@ struct NoteLibraryView: View {
                             Text(card.unreadable ? "읽을 수 없는 노트" : card.modified.formatted(date:.abbreviated,time:.shortened))
                                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }.frame(maxWidth:.infinity)
+                        .background {
+                            RoundedRectangle(cornerRadius:12)
+                                .fill(Color.accentColor.opacity(hoveredNote == card.id ? 0.08 : 0))
+                                .padding(-8)
+                        }
+                        .contentShape(Rectangle())
+                        .background(LibraryCardHover { inside in
+                            if inside { hoveredNote = card.id }
+                            else if hoveredNote == card.id { hoveredNote = nil }
+                        })
+                        .animation(reduceMotion ? nil : .easeOut(duration:0.16),value:hoveredNote == card.id)
                         .contextMenu {
                             Button("열기") { library.open(card) }
                             Button("이름 변경…") { naming = card; name = card.name }
@@ -452,5 +467,40 @@ struct LibraryScopePicker: NSViewRepresentable {
             guard (0...1).contains(sender.selectedSegment) else { return }
             favoritesOnly.wrappedValue = sender.selectedSegment == 1
         }
+    }
+}
+
+/// Track the entire card even when the library is not the keyboard-active window.
+private struct LibraryCardHover: NSViewRepresentable {
+    let changed: (Bool) -> Void
+    func makeNSView(context:Context) -> HoverView { HoverView(changed:changed) }
+    func updateNSView(_ view:HoverView,context:Context) { view.changed = changed }
+    final class HoverView: NSView {
+        var changed: (Bool) -> Void
+        private var area: NSTrackingArea?
+        private var inside = false
+        init(changed:@escaping (Bool) -> Void) {
+            self.changed = changed; super.init(frame:.zero)
+            identifier = NSUserInterfaceItemIdentifier("library-card-hover")
+        }
+        required init?(coder:NSCoder) { fatalError("init(coder:) unavailable") }
+        override func hitTest(_ point:NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            window?.acceptsMouseMovedEvents = true
+        }
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let area { removeTrackingArea(area) }
+            let next = NSTrackingArea(rect:.zero,options:[.mouseEnteredAndExited,.mouseMoved,.activeAlways,.inVisibleRect],owner:self)
+            addTrackingArea(next); area = next
+        }
+        private func report(_ value:Bool) {
+            guard inside != value else { return }
+            inside = value; changed(value)
+        }
+        override func mouseEntered(with event:NSEvent) { report(true) }
+        override func mouseMoved(with event:NSEvent) { report(true) }
+        override func mouseExited(with event:NSEvent) { report(false) }
     }
 }

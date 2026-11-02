@@ -1698,6 +1698,23 @@ extension AppSelfTest {
         let bitmap = window.contentView!.bitmapImageRepForCachingDisplay(in:window.contentView!.bounds)!
         window.contentView!.cacheDisplay(in:window.contentView!.bounds,to:bitmap)
         try bitmap.representation(using:.png,properties:[:])!.write(to:URL(fileURLWithPath:"/tmp/lightnote-library-preview.png"))
+        func hoverViews(_ view:NSView) -> [NSView] {
+            (view.identifier?.rawValue == "library-card-hover" ? [view] : []) + view.subviews.flatMap { hoverViews($0) }
+        }
+        let hoverTargets = hoverViews(window.contentView!)
+        try expect(hoverTargets.count == 2 && hoverTargets.allSatisfy { $0.bounds.width > 140 && $0.bounds.height >= 190 },
+                   "Hover tracking does not cover complete note cards")
+        let hoverTarget = hoverTargets[0]
+        let hoverEvent = NSEvent.enterExitEvent(with:.mouseEntered,location:.zero,modifierFlags:[],
+            timestamp:ProcessInfo.processInfo.systemUptime,windowNumber:window.windowNumber,context:nil,
+            eventNumber:0,trackingNumber:0,userData:nil)!
+        hoverTarget.mouseEntered(with:hoverEvent)
+        try await Task.sleep(for:.milliseconds(200))
+        window.contentView!.layoutSubtreeIfNeeded()
+        let highlighted = window.contentView!.bitmapImageRepForCachingDisplay(in:window.contentView!.bounds)!
+        window.contentView!.cacheDisplay(in:window.contentView!.bounds,to:highlighted)
+        try highlighted.representation(using:.png,properties:[:])!.write(to:URL(fileURLWithPath:"/tmp/lightnote-library-hover.png"))
+        hoverTarget.mouseExited(with:hoverEvent)
         for (name, scheme, favorites) in [
             ("dark-favorites", ColorScheme.dark, true),
             ("light", ColorScheme.light, false),
