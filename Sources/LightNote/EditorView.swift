@@ -128,168 +128,122 @@ private struct FloppyDiskIcon: View {
     }
 }
 
-/// Contiguous full-size targets: the padding belongs to each Button's label.
+/// Native tab-role segmented bars own the connected glass track and moving lens.
 struct DrawingToolStrip: View {
     @ObservedObject var state: NoteState
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var hoveredTool: InkTool?
-    @State private var suppressClick = false
-    @GestureState private var dragLocation: CGFloat?
-    private let toolOrder: [InkTool] = [.pen,.eraser,.selection,.laser,.ellipse,.rectangle,.freeArrow,.arrow]
-    private var dropletIndex: Int? { toolOrder.firstIndex { $0 == (hoveredTool ?? state.tool) } }
-    private func tool(_ value: InkTool, help: String) -> some View {
-        Button { if !suppressClick { state.selectTool(value) } } label: {
-            Color.clear.frame(width:44,height:44).contentShape(Rectangle())
-        }
-        .buttonStyle(DrawingToolButtonStyle(tint: value == .laser ? .red : .accentColor,selected:state.tool == value))
-        .topTooltip(help)
-        .accessibilityLabel(value.title)
-        .onHover { inside in
-            guard dragLocation == nil else { return }
-            if inside { hoveredTool = value }
-            else if hoveredTool == value { hoveredTool = nil }
-        }
-    }
+    private let tools: [InkTool] = [.pen,.eraser,.selection,.laser,.ellipse,.rectangle,.freeArrow,.arrow]
+    private let help = ["볼펜 · P / F","획 지우개 · E","사각형 선택 · V","레이저 · L",
+                        "원 / 타원 · C · ⌘ 정원","사각형 · R · ⌘ 정사각형","자유 화살표 · Q","화살표 · A"]
     var body: some View {
-        HStack(spacing: 0) {
-            tool(.pen, help: "볼펜 · P / F")
-            tool(.eraser, help: "획 지우개 · E")
-            tool(.selection, help: "사각형 선택 · V")
-            tool(.laser, help: "레이저 · L")
-            tool(.ellipse, help: "원 / 타원 · C · ⌘ 정원")
-            tool(.rectangle, help: "사각형 · R · ⌘ 정사각형")
-            tool(.freeArrow, help: "자유 화살표 · Q")
-            tool(.arrow, help: "화살표 · A")
-        }.modifier(ToolbarGlassGroup())
-        .coordinateSpace(name:"tool-drag")
-        .simultaneousGesture(DragGesture(minimumDistance:3,coordinateSpace:.named("tool-drag"))
-            .updating($dragLocation) { value, location, transaction in
-                transaction.animation = reduceMotion ? nil : .interactiveSpring(response:0.18,dampingFraction:0.86)
-                location = min(max(value.location.x,22),CGFloat(toolOrder.count)*44-22)
-            }
-            .onChanged { _ in suppressClick = true }
-            .onEnded { value in
-                let index = min(max(Int(floor(value.location.x/44)),0),toolOrder.count-1)
-                withAnimation(reduceMotion ? nil : .spring(response:0.26,dampingFraction:0.82)) {
-                    state.selectTool(toolOrder[index]); hoveredTool = nil
-                }
-                DispatchQueue.main.async { suppressClick = false }
-            })
-        .onChange(of:dragLocation == nil) { _, released in
-            if released { DispatchQueue.main.async { suppressClick = false } }
+        NativeToolbarPicker(items:tools.indices.map { index in
+            let tool = tools[index]
+            return NativeToolbarItem(id:tool.symbol,image:NSImage(systemSymbolName:tool.symbol,accessibilityDescription:tool.title)!,help:help[index])
+        },selected:tools.firstIndex { $0 == state.tool } ?? 0,label:"그리기 도구") { index in
+            state.selectTool(tools[index])
         }
-        .overlay(alignment:.leading) {
-            if let center = dragLocation ?? dropletIndex.map({ CGFloat($0)*44+22 }) {
-                ToolbarDroplet(tint:(hoveredTool ?? state.tool) == .laser ? .red : .accentColor)
-                    .frame(width:!reduceMotion && dragLocation != nil ? 42 : 38,
-                           height:!reduceMotion && dragLocation != nil ? 36 : 38)
-                    .offset(x:center - (!reduceMotion && dragLocation != nil ? 21 : 19))
-                    .allowsHitTesting(false).accessibilityHidden(true)
-            }
-        }
-        .overlay {
-            HStack(spacing:0) {
-                ForEach(toolOrder.indices,id:\.self) { index in
-                    let value = toolOrder[index]
-                    Image(systemName:value.symbol)
-                        .foregroundStyle(state.tool == value ? (value == .laser ? Color.red : Color.accentColor) : (colorScheme == .dark ? Color.white.opacity(0.72) : Color.black.opacity(0.65)))
-                        .frame(width:44,height:44)
-                }
-            }.allowsHitTesting(false).accessibilityHidden(true)
-        }
-        .animation(reduceMotion ? nil : .spring(response:0.3,dampingFraction:0.82),value:dropletIndex)
-        .animation(reduceMotion ? nil : .spring(response:0.24,dampingFraction:0.72),value:hoveredTool != nil)
-        .animation(reduceMotion ? nil : .spring(response:0.26,dampingFraction:0.82),value:dragLocation == nil)
     }
 }
 
-/// Color swatches share the drawing tools' full-size targets and hover feedback.
 struct ColorPresetStrip: View {
     @ObservedObject var state: NoteState
     @ObservedObject private var preferences = AppPreferences.shared
-    @State private var hoveredKey: String?
-    @State private var suppressClick = false
-    @GestureState private var dragLocation: CGFloat?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private var dropletIndex: Int? {
-        if let hoveredKey, let index = preferences.colorPresets.firstIndex(where: { $0.key == hoveredKey }) { return index }
-        return preferences.colorPresets.firstIndex(where: { $0.color == state.color })
-    }
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(preferences.colorPresets, id: \.key) { preset in
-                Button { if !suppressClick { state.color = preset.color } } label: {
-                    Color.clear.frame(width:44,height:44).contentShape(Rectangle())
-                }
-                .buttonStyle(DrawingToolButtonStyle(tint: .accentColor,selected:state.color == preset.color))
-                .topTooltip(preset.name + " · " + preset.key)
-                .accessibilityLabel(preset.name + " 펜")
-                .onHover { inside in
-                    guard dragLocation == nil else { return }
-                    if inside { hoveredKey = preset.key }
-                    else if hoveredKey == preset.key { hoveredKey = nil }
-                }
+        NativeToolbarPicker(items:preferences.colorPresets.map { preset in
+            let color = NSColor(cgColor:preset.color.cgColor)!
+            let image = NSImage(size:NSSize(width:24,height:24),flipped:false) { rect in
+                color.setFill()
+                NSBezierPath(ovalIn:rect.insetBy(dx:2.5,dy:2.5)).fill()
+                return true
             }
-        }.modifier(ToolbarGlassGroup())
-        .coordinateSpace(name:"palette-drag")
-        .simultaneousGesture(DragGesture(minimumDistance:3,coordinateSpace:.named("palette-drag"))
-            .updating($dragLocation) { value, location, transaction in
-                transaction.animation = reduceMotion ? nil : .interactiveSpring(response:0.18,dampingFraction:0.86)
-                location = min(max(value.location.x,22),CGFloat(preferences.colorPresets.count)*44-22)
-            }
-            .onChanged { _ in suppressClick = true }
-            .onEnded { value in
-                let index = min(max(Int(floor(value.location.x/44)),0),preferences.colorPresets.count-1)
-                withAnimation(reduceMotion ? nil : .spring(response:0.26,dampingFraction:0.82)) {
-                    state.color = preferences.colorPresets[index].color
-                    hoveredKey = nil
-                }
-                DispatchQueue.main.async { suppressClick = false }
-            })
-        .onChange(of:dragLocation == nil) { _, released in
-            if released { DispatchQueue.main.async { suppressClick = false } }
+            image.accessibilityDescription = preset.name + " 펜"
+            let key = preset.key + ":" + [preset.color.red,preset.color.green,preset.color.blue,preset.color.alpha].map { String($0) }.joined(separator:",")
+            return NativeToolbarItem(id:key,image:image,help:preset.name + " · " + preset.key)
+        },selected:preferences.colorPresets.firstIndex { $0.color == state.color } ?? -1,label:"펜 색상") { index in
+            state.color = preferences.colorPresets[index].color
         }
-        .overlay(alignment:.leading) {
-            if let center = dragLocation ?? dropletIndex.map({ CGFloat($0)*44+22 }) {
-                ToolbarDroplet()
-                    .frame(width:!reduceMotion && dragLocation != nil ? 42 : 38,
-                           height:!reduceMotion && dragLocation != nil ? 36 : 38)
-                    .offset(x:center - (!reduceMotion && dragLocation != nil ? 21 : 19))
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-        }
-        .overlay {
-            HStack(spacing:0) {
-                ForEach(preferences.colorPresets,id:\.key) { preset in
-                    Circle().fill(Color(cgColor:preset.color.cgColor))
-                        .frame(width:19,height:19).padding(4)
-                        .overlay(Circle().stroke(state.color == preset.color ? Color.accentColor : .clear,lineWidth:2))
-                        .frame(width:44,height:44)
-                }
-            }.allowsHitTesting(false).accessibilityHidden(true)
-        }
-        .animation(reduceMotion ? nil : .spring(response:0.3,dampingFraction:0.82),value:dropletIndex)
-        .animation(reduceMotion ? nil : .spring(response:0.24,dampingFraction:0.72),value:hoveredKey != nil)
-        .animation(reduceMotion ? nil : .spring(response:0.26,dampingFraction:0.82),value:dragLocation == nil)
     }
 }
 
-private struct ToolbarDroplet: View {
-    var tint: Color = .accentColor
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    var body: some View {
-        surface.overlay(RoundedRectangle(cornerRadius:12,style:.continuous).strokeBorder(
-            LinearGradient(colors:[.white.opacity(0.55), .white.opacity(0.05), .white.opacity(0.28)],
-                           startPoint:.topLeading,endPoint:.bottomTrailing),lineWidth:1))
-            .shadow(color:tint.opacity(0.12),radius:3,y:1)
+private struct NativeToolbarItem {
+    let id: String
+    let image: NSImage
+    let help: String
+}
+
+private struct NativeToolbarPicker: NSViewRepresentable {
+    let items: [NativeToolbarItem]
+    let selected: Int
+    let label: String
+    let onSelect: (Int) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(onSelect:onSelect) }
+    func makeNSView(context:Context) -> ToolbarSegments {
+        let control = ToolbarSegments()
+        control.trackingMode = .selectOne
+        control.segmentStyle = .automatic
+        control.segmentDistribution = .fillEqually
+        control.target = context.coordinator; control.action = #selector(Coordinator.changed(_:))
+        if #available(macOS 26.0, *) {
+            control.prefersCompactControlSizeMetrics = false
+            control.controlSize = .extraLarge; control.borderShape = .capsule
+        } else { control.controlSize = .large }
+        if #available(macOS 27.0, *) { control.role = .tabs }
+        return control
     }
-    @ViewBuilder private var surface: some View {
-        if #available(macOS 26.0, *), !reduceTransparency {
-            RoundedRectangle(cornerRadius:12,style:.continuous).fill(.clear).glassEffect(.clear,in:RoundedRectangle(cornerRadius:12,style:.continuous))
-        } else {
-            RoundedRectangle(cornerRadius:12,style:.continuous).strokeBorder(Color.accentColor.opacity(0.7),lineWidth:2)
+    func updateNSView(_ control:ToolbarSegments,context:Context) {
+        context.coordinator.onSelect = onSelect
+        control.configure(items)
+        if control.selectedSegment != selected { control.selectedSegment = selected }
+        control.isEnabled = context.environment.isEnabled
+        control.setAccessibilityLabel(label)
+    }
+    func sizeThatFits(_ proposal:ProposedViewSize,nsView:ToolbarSegments,context:Context) -> CGSize? {
+        NSSize(width:CGFloat(items.count)*44,height:44)
+    }
+    @MainActor final class Coordinator:NSObject {
+        var onSelect: (Int) -> Void
+        init(onSelect:@escaping (Int) -> Void) { self.onSelect = onSelect }
+        @objc func changed(_ sender:NSSegmentedControl) {
+            guard (0..<sender.segmentCount).contains(sender.selectedSegment) else { return }
+            onSelect(sender.selectedSegment)
+        }
+    }
+    final class FullTargetSegmentCell:NSSegmentedCell {
+        override func hitTest(for event:NSEvent,in cellFrame:NSRect,of controlView:NSView) -> NSCell.HitResult {
+            if isEnabled, controlView.bounds.contains(controlView.convert(event.locationInWindow,from:nil)) {
+                return [.contentArea,.trackableArea]
+            }
+            return super.hitTest(for:event,in:cellFrame,of:controlView)
+        }
+    }
+    final class ToolbarSegments:NSSegmentedControl {
+        override class var cellClass: AnyClass? {
+            get { FullTargetSegmentCell.self }
+            set {}
+        }
+        override var alignmentRectInsets: NSEdgeInsets { NSEdgeInsetsZero }
+
+        private var keys: [String] = []
+        private var tips: [TooltipAnchorView] = []
+        func configure(_ items:[NativeToolbarItem]) {
+            guard keys != items.map(\.id) else { return }
+            keys = items.map(\.id)
+            tips.forEach { $0.hideTooltip(); $0.removeFromSuperview() }; tips.removeAll()
+            segmentCount = items.count
+            for (index,item) in items.enumerated() {
+                setImage(item.image,forSegment:index)
+                setImageScaling(.scaleProportionallyDown,forSegment:index)
+                setWidth(0,forSegment:index)
+                let tip = TooltipAnchorView(text:item.help)
+                addSubview(tip); tips.append(tip)
+            }
+            needsLayout = true
+        }
+        override func layout() {
+            super.layout()
+            let width = bounds.width/CGFloat(max(segmentCount,1))
+            for (index,tip) in tips.enumerated() {
+                tip.frame = NSRect(x:CGFloat(index)*width,y:0,width:width,height:bounds.height)
+            }
         }
     }
 }
@@ -315,15 +269,6 @@ private struct ToolbarActionButtonStyle: ButtonStyle {
                 .animation(reduceMotion ? nil : .easeOut(duration:0.12),value:hovering)
                 .animation(reduceMotion ? nil : .easeOut(duration:0.08),value:configuration.isPressed)
         }
-    }
-}
-
-/// Keep one native glass container for neighboring controls to share the material.
-private struct ToolbarGlassGroup: ViewModifier {
-    @ViewBuilder func body(content:Content) -> some View {
-        if #available(macOS 26.0, *) {
-            GlassEffectContainer(spacing:8) { content }
-        } else { content }
     }
 }
 

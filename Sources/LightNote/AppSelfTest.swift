@@ -1468,6 +1468,15 @@ extension AppSelfTest {
         }
         try await Task.sleep(for:.milliseconds(100))
         window.contentView!.layoutSubtreeIfNeeded()
+        func nativeSegments(_ view:NSView) -> NSSegmentedControl? {
+            if let control = view as? NSSegmentedControl { return control }
+            for child in view.subviews { if let control = nativeSegments(child) { return control } }
+            return nil
+        }
+        guard let toolControl = nativeSegments(window.contentView!), toolControl.segmentCount == 8 else {
+            throw Failure(message:"Tools are not a native connected segmented bar")
+        }
+        if #available(macOS 27.0, *), toolControl.role != .tabs { throw Failure(message:"Tools do not use native tab lens interaction") }
         let tools:[InkTool] = [.pen,.eraser,.selection,.laser,.ellipse,.rectangle,.freeArrow,.arrow]
         for (index,tool) in tools.enumerated() {
             // Opposite corners are deliberately outside the symbol's painted pixels.
@@ -1514,6 +1523,12 @@ extension AppSelfTest {
             }
         }
 
+        guard let colorControl = nativeSegments(window.contentView!), colorControl.segmentCount == 10 else {
+            throw Failure(message:"Colors are not a native connected segmented bar")
+        }
+        state.color = InkColor(0.23,0.41,0.67)
+        try await Task.sleep(for:.milliseconds(50))
+        guard colorControl.selectedSegment == -1 else { throw Failure(message:"Custom color incorrectly selected a preset") }
         // A palette drag must commit the release segment, not the original button.
         state.color = .blue
         let dragTime = ProcessInfo.processInfo.systemUptime
