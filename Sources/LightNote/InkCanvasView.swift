@@ -306,7 +306,10 @@ final class InkCanvasView: NSView {
                                   height:max(state.note.pageHeight, extent.isNull ? 0 : extent.maxY)))
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
-    @objc private func appResigned() { finishStroke(reason: "app-inactive") }
+    @objc private func appResigned() {
+        focusRequest = UUID()
+        finishStroke(reason: "app-inactive")
+    }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         if let window { NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: window) }
@@ -318,6 +321,7 @@ final class InkCanvasView: NSView {
         }
     }
     @objc private func windowResigned() {
+        focusRequest = UUID()
         finishStroke(reason: "window-inactive")
         updateCommandSelection(false)
     }

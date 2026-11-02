@@ -123,3 +123,10 @@
 - Drawing now requests running-app activation as well as app activation, then reapplies the owning window/responder after 0/80/250 ms. Active drag and pressure-positive tablet events also recover focus. Retries are bounded and scoped to the initiating app/document, skip text editors, sheets, modal dialogs and switches to a third app/another LightNote window.
 - Signed universal release on arm64: CHROME_DRAWING_ACTIVATION_PASSED, DRAWING_FOCUS_TEST_PASSED and APP_SELF_TEST_PASSED. The focus test activates real running Chrome/Finder, delivers synthetic canvas input, checks frontmost process/key window/responder, simulates a responder reset during activation and verifies text retains focus beyond the retry period.
 - No physical Apple Pencil/Sidecar test; OS event delivery from that hardware remains a manual check. No user app was terminated or restarted.
+
+## v0.15.5 — Command selection modifier routing
+
+- Editor windows explicitly dispatch flagsChanged once to the canvas, including when it already owns first responder. Text fields, sheets and modal dialogs retain their own modifiers. Existing shape constraints and successful-selection persistence are preserved.
+- Cancel pending background-focus retries on app/window resignation.
+- Added NSApp.sendEvent Command down/up assertions with canvas and window responders; wait for initial activation and include timeout call-site diagnostics.
+- Signed universal release on arm64 launched through Launch Services (`open -n -W`): CHROME_DRAWING_ACTIVATION_PASSED, DRAWING_FOCUS_TEST_PASSED. Direct executable launches intermittently failed initial app activation before the modifier assertions; normal application launch passed. APP_SELF_TEST_PASSED covers successful/empty Command selections, constrained shapes, deletion/Undo/Redo. No physical Sidecar test.

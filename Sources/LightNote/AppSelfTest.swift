@@ -1305,12 +1305,12 @@ extension AppSelfTest {
 
 extension AppSelfTest {
     static func testDrawingFocus(returnTo original: NSRunningApplication?) async throws {
-        func waitFor(_ predicate: () -> Bool) async throws {
+        func waitFor(line: Int = #line, _ predicate: () -> Bool) async throws {
             for _ in 0..<500 {
                 if predicate() { return }
                 try await Task.sleep(for:.milliseconds(10))
             }
-            throw Failure(message:"Focus transition timed out")
+            throw Failure(message:"Focus transition timed out at line \(line)")
         }
         let oldDelay = NSDocumentController.shared.autosavingDelay
         NSDocumentController.shared.autosavingDelay = 60
@@ -1336,6 +1336,9 @@ extension AppSelfTest {
         func event(_ type: NSEvent.EventType,_ point:CGPoint,_ time:Double) -> NSEvent {
             NSEvent.mouseEvent(with:type,location:canvas.convert(point,to:nil),modifierFlags:[],timestamp:time,windowNumber:window.windowNumber,context:nil,eventNumber:0,clickCount:1,pressure:0)!
         }
+        NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
+        NSApp.activate()
+        try await waitFor { NSApp.isActive }
         window.makeKeyAndOrderFront(nil)
         other.makeKeyAndOrderFront(nil); other.makeFirstResponder(field)
         try await waitFor { other.isKeyWindow }
@@ -1376,6 +1379,20 @@ extension AppSelfTest {
         let key=NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:[],timestamp:7,windowNumber:window.windowNumber,context:nil,characters:"e",charactersIgnoringModifiers:"e",isARepeat:false,keyCode:14)!
         NSApp.sendEvent(key)
         guard doc.state.tool == .eraser, window.firstResponder === canvas else { throw Failure(message:"Canvas shortcuts did not follow focus") }
+        for responder: NSResponder in [canvas, window] {
+            window.makeFirstResponder(responder)
+            doc.state.selectTool(.pen)
+            for down in [true, false] {
+                let flags = NSEvent.keyEvent(with: .flagsChanged, location: .zero,
+                    modifierFlags: down ? .command : [], timestamp: 11,
+                    windowNumber: window.windowNumber, context: nil, characters: "",
+                    charactersIgnoringModifiers: "", isARepeat: false, keyCode: 55)!
+                NSApp.sendEvent(flags)
+                guard doc.state.tool == (down ? .selection : .pen) else {
+                    throw Failure(message: "Window modifier routing lost Command selection")
+                }
+            }
+        }
         // Reproduce focus left on a toolbar control / hosting root after sheet dismissal.
         let button = NSButton(title: "Toolbar", target: nil, action: nil)
         button.frame = NSRect(x: 0, y: 0, width: 80, height: 24)
