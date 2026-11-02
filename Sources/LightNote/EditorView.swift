@@ -145,7 +145,7 @@ struct DrawingToolStrip: View {
     }
     var body: some View {
         HStack(spacing: 0) {
-            tool(.pen, help: "볼펜 · P")
+            tool(.pen, help: "볼펜 · P / F")
             tool(.eraser, help: "획 지우개 · E")
             tool(.selection, help: "사각형 선택 · V")
             tool(.laser, help: "레이저 · L")
@@ -419,7 +419,7 @@ private struct ShortcutHelpView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("그리기 도구").font(.headline).padding(.bottom, 6)
-                    row("P", "펜")
+                    row("P / F", "펜")
                     row("⇧ + 펜 드래그", "시작점부터 커서까지 직선 · 떼면 자유 필기")
                     row("E", "획 지우개")
                     row("V", "사각형 선택 · 내부 드래그로 이동")

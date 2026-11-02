@@ -130,3 +130,8 @@
 - Cancel pending background-focus retries on app/window resignation.
 - Added NSApp.sendEvent Command down/up assertions with canvas and window responders; wait for initial activation and include timeout call-site diagnostics.
 - Signed universal release on arm64 launched through Launch Services (`open -n -W`): CHROME_DRAWING_ACTIVATION_PASSED, DRAWING_FOCUS_TEST_PASSED. Direct executable launches intermittently failed initial app activation before the modifier assertions; normal application launch passed. APP_SELF_TEST_PASSED covers successful/empty Command selections, constrained shapes, deletion/Undo/Redo. No physical Sidecar test.
+
+## v0.15.6 — F pen shortcut
+
+- F and P select pen. Physical F works with Korean input; editor window routing and tooltip/help include the alias.
+- Signed universal release on arm64: APP_SELF_TEST_PASSED (P and Korean physical F), CHROME_DRAWING_ACTIVATION_PASSED and DRAWING_FOCUS_TEST_PASSED (F through toolbar/window responders).

@@ -114,6 +114,13 @@ enum AppSelfTest {
             characters: "p", charactersIgnoringModifiers: "p", isARepeat: false, keyCode: 35)!
         canvas.keyDown(with: penKey)
         try expect(doc.state.tool == .pen, "P did not restore pen")
+        doc.state.selectTool(.eraser)
+        let fKey = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+            timestamp: 400, windowNumber: window.windowNumber, context: nil,
+            characters: "ㄹ", charactersIgnoringModifiers: "ㄹ", isARepeat: false, keyCode: 3)!
+        canvas.keyDown(with: fKey)
+        try expect(doc.state.tool == .pen, "Physical F did not restore pen with Korean input")
+
         let beforeSelection = doc.state.note.strokes
         let selectKey = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
             timestamp: 410, windowNumber: window.windowNumber, context: nil,
@@ -1404,6 +1411,14 @@ extension AppSelfTest {
             NSApp.sendEvent(key)
             guard doc.state.tool == .eraser, window.firstResponder === canvas else {
                 throw Failure(message: "Toolbar/root responder swallowed canvas shortcut")
+            }
+            window.makeFirstResponder(responder)
+            let fKey = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                timestamp: 12, windowNumber: window.windowNumber, context: nil,
+                characters: "f", charactersIgnoringModifiers: "f", isARepeat: false, keyCode: 3)!
+            NSApp.sendEvent(fKey)
+            guard doc.state.tool == .pen, window.firstResponder === canvas else {
+                throw Failure(message: "Window routing lost F pen shortcut")
             }
         }
         let text = NSTextView(frame: NSRect(x: 0, y: 30, width: 100, height: 30))

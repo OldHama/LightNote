@@ -1018,7 +1018,7 @@ final class InkCanvasView: NSView {
                 state.selectTool(.eraser)
                 return
             }
-            if event.keyCode == 35 || event.charactersIgnoringModifiers?.lowercased() == "p" {
+            if event.keyCode == 35 || event.keyCode == 3 || ["p", "f"].contains(event.charactersIgnoringModifiers?.lowercased() ?? "") {
                 state.selectTool(.pen)
                 return
             }
