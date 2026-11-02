@@ -135,3 +135,8 @@
 
 - F and P select pen. Physical F works with Korean input; editor window routing and tooltip/help include the alias.
 - Signed universal release on arm64: APP_SELF_TEST_PASSED (P and Korean physical F), CHROME_DRAWING_ACTIVATION_PASSED and DRAWING_FOCUS_TEST_PASSED (F through toolbar/window responders).
+
+## v0.15.7 — simplify editor file controls
+
+- Removed the editor toolbar New/Open buttons; Library, Save and Help remain. File menu and Command-N/O are unchanged.
+- Universal release build, installation and Sparkle signature verification passed. This UI-only removal did not add tests or change document logic.
