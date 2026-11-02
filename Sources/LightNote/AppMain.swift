@@ -46,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
             NSApp.applicationIconImage = icon
         }
         NSDocumentController.shared.autosavingDelay = 2
+        AppPreferences.shared.applyAppearance()
         installMenu()
         NotificationCenter.default.addObserver(self, selector: #selector(updatePreferences(_:)),
             name: AppPreferences.changed, object: AppPreferences.shared)
@@ -152,6 +153,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         preferencesController?.window?.makeKeyAndOrderFront(sender)
     }
     @objc private func updatePreferences(_ notification: Notification) {
+        if notification.userInfo?["kind"] as? String == "appearance" {
+            AppPreferences.shared.applyAppearance()
+            return
+        }
         guard notification.userInfo?["kind"] as? String == "updates",
               !CommandLine.arguments.contains("--self-test") else { return }
         updaterController.updater.automaticallyChecksForUpdates = AppPreferences.shared.automaticChecks

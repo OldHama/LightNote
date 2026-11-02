@@ -8,6 +8,26 @@ final class AppPreferences: ObservableObject {
         ? UserDefaults(suiteName: "com.lightnote.test." + UUID().uuidString)! : .standard)
     static let changed = Notification.Name("LightNotePreferencesChanged")
     static let defaultsKey = "LightNoteDrawingPreferences"
+    static let appearanceKey = "LightNoteAppearanceMode"
+    enum AppearanceMode: String, CaseIterable, Identifiable {
+        case system, light, dark
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .system: "시스템 설정 따르기"
+            case .light: "라이트 모드"
+            case .dark: "나이트 모드"
+            }
+        }
+        var appearance: NSAppearance? {
+            switch self {
+            case .system: nil
+            case .light: NSAppearance(named:.aqua)
+            case .dark: NSAppearance(named:.darkAqua)
+            }
+        }
+    }
+
     nonisolated static let originalPresets: [(key: String, name: String, color: InkColor)] = [
         ("1", "검정", .black), ("2", "파랑", .blue), ("3", "빨강", .red), ("4", "초록", .green),
         ("5", "주황", InkColor(0.95, 0.43, 0.08)), ("6", "노랑", InkColor(0.85, 0.65, 0.02)),
@@ -25,6 +45,13 @@ final class AppPreferences: ObservableObject {
     }
     private let defaults: UserDefaults
     private var syncingUpdates = false
+    @Published var appearanceMode: AppearanceMode {
+        didSet {
+            defaults.set(appearanceMode.rawValue,forKey:Self.appearanceKey)
+            NotificationCenter.default.post(name:Self.changed,object:self,userInfo:["kind":"appearance"])
+        }
+    }
+    func applyAppearance() { NSApp.appearance = appearanceMode.appearance }
     @Published var penColor: InkColor { didSet { save("pen") } }
     @Published var penWidth: Double { didSet { save("pen") } }
     @Published var defaultPaper: PaperStyle { didSet { save("paper") } }
@@ -42,6 +69,7 @@ final class AppPreferences: ObservableObject {
     }
     init(defaults: UserDefaults) {
         self.defaults = defaults
+        appearanceMode = AppearanceMode(rawValue:defaults.string(forKey:Self.appearanceKey) ?? "") ?? .system
         let decoded = defaults.data(forKey: Self.defaultsKey).flatMap { try? JSONDecoder().decode(Stored.self, from: $0) }
         let stored: Stored
         if let decoded, Self.valid(decoded) { stored = decoded } else { stored = Stored() }
@@ -93,6 +121,17 @@ struct PreferencesView: View {
     }
     var body: some View {
         TabView {
+            Form {
+                Section("앱 모양") {
+                    Picker("모드",selection:$preferences.appearanceMode) {
+                        ForEach(AppPreferences.AppearanceMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }.pickerStyle(.radioGroup)
+                    Text("선택 즉시 적용되며 다음 실행에도 유지됩니다.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }.formStyle(.grouped).tabItem { Label("모양",systemImage:"circle.lefthalf.filled") }
             Form {
                 Section("펜 기본값") {
                     ColorPicker("펜 색상", selection: color({ preferences.penColor }, { preferences.penColor = $0 }), supportsOpacity: false)

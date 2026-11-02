@@ -423,6 +423,22 @@ enum AppSelfTest {
         let preferencesDefaults = UserDefaults(suiteName: preferencesDomain)!
         defer { preferencesDefaults.removePersistentDomain(forName: preferencesDomain) }
         let settings = AppPreferences(defaults: preferencesDefaults)
+        try expect(settings.appearanceMode == .system,"Default appearance did not follow the system")
+        let originalAppAppearance = NSApp.appearance
+        defer { NSApp.appearance = originalAppAppearance }
+        for (mode, expectedName) in [(AppPreferences.AppearanceMode.light,NSAppearance.Name.aqua),(.dark,.darkAqua)] {
+            settings.appearanceMode = mode
+            let reloaded = AppPreferences(defaults:preferencesDefaults)
+            try expect(reloaded.appearanceMode == mode,"Appearance preference did not persist")
+            reloaded.applyAppearance()
+            try expect(NSApp.appearance?.name == expectedName,"Application appearance did not update")
+        }
+        settings.appearanceMode = .system; settings.applyAppearance()
+        try expect(NSApp.appearance == nil,"System appearance did not remove the app override")
+        preferencesDefaults.set("unsupported-mode",forKey:AppPreferences.appearanceKey)
+        try expect(AppPreferences(defaults:preferencesDefaults).appearanceMode == .system,"Invalid appearance mode did not fall back to system")
+        preferencesDefaults.removeObject(forKey:AppPreferences.appearanceKey)
+
         settings.penColor = .red; settings.penWidth = 3; settings.defaultPaper = .blank
         settings.palette[0] = .blue
         settings.paperColor = InkColor(0.9, 0.9, 0.8)
@@ -1557,6 +1573,13 @@ extension AppSelfTest {
               window.isKeyWindow else { throw Failure(message:"Tooltip was not above the control or stole focus") }
         anchor.mouseExited(with:NSEvent.enterExitEvent(with:.mouseExited,location:.zero,modifierFlags:[],timestamp:ProcessInfo.processInfo.systemUptime,windowNumber:window.windowNumber,context:nil,eventNumber:0,trackingNumber:0,userData:nil)!)
         guard anchor.tooltipWindow == nil else { throw Failure(message:"Tooltip did not dismiss") }
+        if CommandLine.arguments.contains("--appearance-preview") {
+            window.title = "환경설정 모양 검사"
+            window.setContentSize(NSSize(width:520,height:560))
+            window.contentView = NSHostingView(rootView:PreferencesView())
+            try await Task.sleep(for:.seconds(90))
+        }
+
 
     }
 }
