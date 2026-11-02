@@ -296,8 +296,10 @@ struct NoteLibraryView: View {
                 if library.directory.path != library.root.path {
                     Button { library.directory = library.directory.deletingLastPathComponent(); library.refresh() } label: { Image(systemName:"chevron.left") }
                 }
-                Text(library.pathTitle).font(.headline).lineLimit(1)
-                Toggle("즐겨찾기",isOn:$library.favoritesOnly).toggleStyle(.button)
+                LibraryScopePicker(favoritesOnly:$library.favoritesOnly)
+                if library.directory.path != library.root.path {
+                    Text(library.pathTitle).font(.headline).lineLimit(1)
+                }
                 Spacer()
                 TextField("노트 검색",text:$library.query).textFieldStyle(.roundedBorder).frame(width:220)
                 Picker("정렬",selection:$library.sort) { ForEach(NoteLibrary.Sort.allCases,id:\.self) { Text($0.rawValue).tag($0) } }.labelsHidden().frame(width:130)
@@ -404,5 +406,69 @@ struct NoteLibraryView: View {
             }
         } message: { if let card = deleting { Text(card.name) } }
 
+    }
+}
+
+/// One glass surface with a sliding selected segment, rather than stacked glass layers.
+struct LibraryScopePicker: View {
+    @Binding var favoritesOnly: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorScheme) private var colorScheme
+    @Namespace private var selection
+    @State private var hovered: Bool?
+
+    private var segments: some View {
+        HStack(spacing:4) {
+            segment("모든 노트", icon:"square.grid.2x2", favorites:false)
+            segment("즐겨찾기", icon:"star", favorites:true)
+        }.padding(5)
+    }
+    var body: some View {
+        surface
+            .overlay(Capsule().strokeBorder(
+                LinearGradient(colors:[.white.opacity(colorScheme == .dark ? 0.24 : 0.8), .white.opacity(0.03)],
+                               startPoint:.topLeading,endPoint:.bottomTrailing),lineWidth:1))
+            .shadow(color:.black.opacity(colorScheme == .dark ? 0.18 : 0.08),radius:8,y:3)
+            .accessibilityElement(children:.contain)
+            .accessibilityLabel("노트 보기")
+    }
+    @ViewBuilder private var surface: some View {
+        if reduceTransparency {
+            segments.background(Color(nsColor:.controlBackgroundColor),in:Capsule())
+        } else if #available(macOS 26.0, *) {
+            segments.glassEffect(.regular, in:Capsule())
+        } else {
+            segments.background(.regularMaterial,in:Capsule())
+        }
+    }
+    private func segment(_ title: String, icon: String, favorites: Bool) -> some View {
+        let selected = favoritesOnly == favorites
+        return Button {
+            withAnimation(reduceMotion ? nil : .spring(response:0.32,dampingFraction:0.82)) {
+                favoritesOnly = favorites
+            }
+        } label: {
+            Label(title,systemImage:icon)
+                .font(.system(size:13,weight:selected ? .semibold : .medium))
+                .foregroundStyle((colorScheme == .dark ? Color.white : Color.black).opacity(selected ? 0.95 : 0.68))
+                .frame(width:126,height:36)
+                .background {
+                    if selected {
+                        Capsule()
+                            .fill(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.06))
+                            .overlay(Capsule().fill(LinearGradient(colors:[.white.opacity(colorScheme == .dark ? 0.12 : 0.65),.white.opacity(0.02)],startPoint:.top,endPoint:.bottom)))
+                            .overlay(Capsule().strokeBorder(.white.opacity(colorScheme == .dark ? 0.22 : 0.7),lineWidth:0.7))
+                            .matchedGeometryEffect(id:"library-scope",in:selection)
+                    } else if hovered == favorites {
+                        Capsule().fill(Color.primary.opacity(0.06))
+                    }
+                }
+                .contentShape(Capsule())
+        }.buttonStyle(.plain)
+            .onHover { inside in hovered = inside ? favorites : nil }
+            .accessibilityLabel(title)
+            .accessibilityValue(selected ? "선택됨" : "")
+            .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 }

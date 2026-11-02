@@ -1664,5 +1664,21 @@ extension AppSelfTest {
         let bitmap = window.contentView!.bitmapImageRepForCachingDisplay(in:window.contentView!.bounds)!
         window.contentView!.cacheDisplay(in:window.contentView!.bounds,to:bitmap)
         try bitmap.representation(using:.png,properties:[:])!.write(to:URL(fileURLWithPath:"/tmp/lightnote-library-preview.png"))
+        for (name, scheme, favorites) in [
+            ("dark-favorites", ColorScheme.dark, true),
+            ("light", ColorScheme.light, false),
+            ("light-favorites", ColorScheme.light, true)
+        ] {
+            library.favoritesOnly = favorites
+            window.appearance = NSAppearance(named:scheme == .dark ? .darkAqua : .aqua)
+            window.contentView = NSHostingView(rootView:NoteLibraryView(library:library)
+                .environment(\.colorScheme,scheme))
+            try await Task.sleep(for:.milliseconds(150))
+            window.contentView!.layoutSubtreeIfNeeded()
+            let preview = window.contentView!.bitmapImageRepForCachingDisplay(in:window.contentView!.bounds)!
+            window.contentView!.cacheDisplay(in:window.contentView!.bounds,to:preview)
+            try preview.representation(using:.png,properties:[:])!.write(to:URL(fileURLWithPath:"/tmp/lightnote-library-"+name+".png"))
+        }
+
     }
 }

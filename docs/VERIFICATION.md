@@ -145,3 +145,10 @@
 
 - Added a final full-cell clickable plus card to the library grid, including empty/search/favorite views. It uses the existing busy-guarded createNote operation for the current folder. Hover tint, tooltip and accessibility label are provided.
 - Signed universal release on arm64: NOTE_LIBRARY_TEST_PASSED (including current-folder note creation). Inspected /tmp/lightnote-library-preview.png: plus card matches note thumbnail dimensions and aligns with labels. No automated physical card-click test added.
+
+## v0.15.9 — glass library scope control
+
+- Replaced the separate scope title/favorite toggle with a single capsule containing All Notes and Favorites buttons. Uses native SwiftUI glassEffect on macOS 26+, regularMaterial on macOS 15, and opaque control background when Reduce Transparency is enabled. A matched-geometry selected capsule slides with spring animation unless Reduce Motion is enabled. Explicit light/dark text colors preserve contrast; hover and full segment hit areas are provided.
+- Subfolder breadcrumb/back navigation and favorites filtering remain connected to the existing library state.
+- Signed universal release on arm64: NOTE_LIBRARY_TEST_PASSED. Rendered and visually inspected dark/all, dark/favorites and light/all views; light/favorites also rendered. Legacy OS/material fallback and accessibility system settings were compiled but not run on a separate system. Screenshot rendering is static, not proof of live animation timing.
+- Apple API reference: https://developer.apple.com/documentation/swiftui/applying-liquid-glass-to-custom-views
