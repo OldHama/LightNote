@@ -1467,6 +1467,19 @@ extension AppSelfTest {
                 guard state.tool == tool else { throw Failure(message:"Toolbar padding did not activate \(tool.title), offset=\(offset)") }
             }
         }
+        state.selectTool(.pen)
+        let toolDragTime = ProcessInfo.processInfo.systemUptime
+        func toolDragEvent(_ type:NSEvent.EventType,_ x:CGFloat,_ time:Double) -> NSEvent {
+            NSEvent.mouseEvent(with:type,location:CGPoint(x:x,y:29),modifierFlags:[],timestamp:time,
+                windowNumber:window.windowNumber,context:nil,eventNumber:0,clickCount:1,pressure:type == .leftMouseUp ? 0 : 1)!
+        }
+        NSApp.postEvent(toolDragEvent(.leftMouseUp,198,toolDragTime+0.08),atStart:true)
+        NSApp.postEvent(toolDragEvent(.leftMouseDragged,198,toolDragTime+0.06),atStart:true)
+        NSApp.postEvent(toolDragEvent(.leftMouseDragged,100,toolDragTime+0.03),atStart:true)
+        NSApp.sendEvent(toolDragEvent(.leftMouseDown,22,toolDragTime))
+        try await Task.sleep(for:.milliseconds(150))
+        guard state.tool == .ellipse else { throw Failure(message:"Tool drag did not commit the release tool") }
+
         window.setContentSize(NSSize(width:440,height:58))
         window.contentView = NSHostingView(rootView:ColorPresetStrip(state:state).frame(width:440,height:58))
         try await Task.sleep(for:.milliseconds(100))

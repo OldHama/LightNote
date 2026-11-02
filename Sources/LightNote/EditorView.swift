@@ -37,7 +37,7 @@ struct EditorView: View {
                     Button { state.showStickers = true } label: {
                         Label("스티커",systemImage:"face.smiling").padding(.horizontal,12).frame(height:44).contentShape(Rectangle())
                     }
-                        .buttonStyle(DrawingToolButtonStyle(tint:.accentColor))
+                        .buttonStyle(DrawingToolButtonStyle(tint:.accentColor,springPress:true))
                         .topTooltip("등록한 스티커 사용").accessibilityLabel("스티커함")
                     ColorPresetStrip(state: state)
                     ColorPicker("색상", selection: Binding(get: { Color(cgColor: state.color.cgColor) }, set: {
@@ -132,8 +132,14 @@ private struct FloppyDiskIcon: View {
 struct DrawingToolStrip: View {
     @ObservedObject var state: NoteState
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hoveredTool: InkTool?
+    @State private var suppressClick = false
+    @GestureState private var dragLocation: CGFloat?
+    private let toolOrder: [InkTool] = [.pen,.eraser,.selection,.laser,.ellipse,.rectangle,.freeArrow,.arrow]
+    private var dropletIndex: Int? { toolOrder.firstIndex { $0 == (hoveredTool ?? state.tool) } }
     private func tool(_ value: InkTool, help: String) -> some View {
-        Button { state.selectTool(value) } label: {
+        Button { if !suppressClick { state.selectTool(value) } } label: {
             Image(systemName: value.symbol)
                 .foregroundStyle(state.tool == value ? (value == .laser ? Color.red : Color.accentColor) : (colorScheme == .dark ? Color.white.opacity(0.72) : Color.black.opacity(0.65)))
                 .frame(width: 44, height: 44)
@@ -142,6 +148,11 @@ struct DrawingToolStrip: View {
         .buttonStyle(DrawingToolButtonStyle(tint: value == .laser ? .red : .accentColor,selected:state.tool == value))
         .topTooltip(help)
         .accessibilityLabel(value.title)
+        .onHover { inside in
+            guard dragLocation == nil else { return }
+            if inside { hoveredTool = value }
+            else if hoveredTool == value { hoveredTool = nil }
+        }
     }
     var body: some View {
         HStack(spacing: 0) {
@@ -154,6 +165,36 @@ struct DrawingToolStrip: View {
             tool(.freeArrow, help: "자유 화살표 · Q")
             tool(.arrow, help: "화살표 · A")
         }.modifier(ToolbarGlassGroup())
+        .coordinateSpace(name:"tool-drag")
+        .simultaneousGesture(DragGesture(minimumDistance:3,coordinateSpace:.named("tool-drag"))
+            .updating($dragLocation) { value, location, transaction in
+                transaction.animation = nil
+                location = min(max(value.location.x,22),CGFloat(toolOrder.count)*44-22)
+            }
+            .onChanged { _ in suppressClick = true }
+            .onEnded { value in
+                let index = min(max(Int(floor(value.location.x/44)),0),toolOrder.count-1)
+                withAnimation(reduceMotion ? nil : .spring(response:0.28,dampingFraction:0.72)) {
+                    state.selectTool(toolOrder[index]); hoveredTool = nil
+                }
+                DispatchQueue.main.async { suppressClick = false }
+            })
+        .onChange(of:dragLocation == nil) { _, released in
+            if released { DispatchQueue.main.async { suppressClick = false } }
+        }
+        .overlay(alignment:.leading) {
+            if let center = dragLocation ?? dropletIndex.map({ CGFloat($0)*44+22 }) {
+                ToolbarDroplet(tint:(hoveredTool ?? state.tool) == .laser ? .red : .accentColor)
+                    .frame(width:38,height:38)
+                    .scaleEffect(x:reduceMotion ? 1 : (dragLocation != nil ? 1.32 : (hoveredTool == nil ? 1 : 1.06)),
+                                 y:reduceMotion ? 1 : (dragLocation != nil ? 1.22 : 1))
+                    .offset(x:center-19)
+                    .allowsHitTesting(false).accessibilityHidden(true)
+            }
+        }
+        .animation(reduceMotion ? nil : .spring(response:0.32,dampingFraction:0.68),value:dropletIndex)
+        .animation(reduceMotion ? nil : .spring(response:0.24,dampingFraction:0.72),value:hoveredTool != nil)
+        .animation(reduceMotion ? nil : .spring(response:0.28,dampingFraction:0.72),value:dragLocation == nil)
     }
 }
 
@@ -210,7 +251,7 @@ struct ColorPresetStrip: View {
         }
         .overlay(alignment:.leading) {
             if let center = dragLocation ?? dropletIndex.map({ CGFloat($0)*44+22 }) {
-                PaletteDroplet()
+                ToolbarDroplet()
                     .frame(width:38,height:38)
                     .scaleEffect(x:reduceMotion ? 1 : (dragLocation != nil ? 1.32 : (hoveredKey == nil ? 1 : 1.06)),
                                  y:reduceMotion ? 1 : (dragLocation != nil ? 1.22 : 1))
@@ -225,13 +266,14 @@ struct ColorPresetStrip: View {
     }
 }
 
-private struct PaletteDroplet: View {
+private struct ToolbarDroplet: View {
+    var tint: Color = .accentColor
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     var body: some View {
         surface.overlay(Capsule().strokeBorder(
             LinearGradient(colors:[.white.opacity(0.85), .white.opacity(0.08), .white.opacity(0.5)],
                            startPoint:.topLeading,endPoint:.bottomTrailing),lineWidth:1))
-            .shadow(color:Color.accentColor.opacity(0.24),radius:5,y:1)
+            .shadow(color:tint.opacity(0.24),radius:5,y:1)
     }
     @ViewBuilder private var surface: some View {
         if #available(macOS 26.0, *), !reduceTransparency {
@@ -279,18 +321,22 @@ private struct ToolbarGlassGroup: ViewModifier {
 private struct DrawingToolButtonStyle: ButtonStyle {
     let tint: Color
     var selected = false
+    var springPress = false
     func makeBody(configuration: Configuration) -> some View {
-        HoverLabel(configuration:configuration,tint:tint,selected:selected)
+        HoverLabel(configuration:configuration,tint:tint,selected:selected,springPress:springPress)
     }
     private struct HoverLabel: View {
         let configuration: ButtonStyle.Configuration
         let tint: Color
         let selected: Bool
+        let springPress: Bool
         @State private var hovering = false
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
         @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
         var body: some View {
             glassLabel
+                .scaleEffect(x:springPress && !reduceMotion ? (configuration.isPressed ? 1.08 : (hovering ? 1.02 : 1)) : 1,
+                             y:springPress && !reduceMotion ? (configuration.isPressed ? 1.12 : (hovering ? 1.02 : 1)) : 1)
                 .contentShape(Rectangle())
                 .onHover { hovering = $0 }
                 .animation(reduceMotion ? nil : .easeOut(duration:0.16),value:hovering)
