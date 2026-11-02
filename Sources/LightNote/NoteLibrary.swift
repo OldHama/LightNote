@@ -266,6 +266,7 @@ final class NoteLibraryWindowController: NSWindowController, NSWindowDelegate {
 
 struct NoteLibraryView: View {
     @ObservedObject var library: NoteLibrary
+    @State private var newNoteHovered = false
     @State private var naming: NoteLibrary.Card?
     @State private var creatingFolder = false
     @State private var name = ""
@@ -351,6 +352,25 @@ struct NoteLibraryView: View {
                             Button("휴지통으로 이동…",role:.destructive) { deleting = card }
                         }
                     }
+                    Button { run { try await library.createNote() } } label: {
+                        VStack(spacing:10) {
+                            RoundedRectangle(cornerRadius:7)
+                                .fill(Color.accentColor.opacity(newNoteHovered ? 0.16 : 0.05))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius:7)
+                                        .strokeBorder(Color.accentColor.opacity(newNoteHovered ? 0.85 : 0.4),
+                                                      style:StrokeStyle(lineWidth:2,dash:[7,5]))
+                                }
+                                .overlay { Image(systemName:"plus").font(.system(size:44,weight:.light)).foregroundStyle(Color.accentColor) }
+                                .frame(width:140,height:190)
+                            Text("새 노트").font(.headline).foregroundStyle(.primary)
+                            Text("클릭하여 만들기").font(.caption).foregroundStyle(.secondary)
+                        }.frame(maxWidth:.infinity).contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                        .onHover { newNoteHovered = $0 }
+                        .help("현재 폴더에 새 노트 만들기")
+                        .accessibilityLabel("새 노트 만들기")
+                        .accessibilityIdentifier("library-new-note-card")
                 }.padding(24)
                 if library.visibleCards.isEmpty && library.visibleFolders.isEmpty {
                     ContentUnavailableView("표시할 노트가 없습니다",systemImage:"books.vertical",description:Text("새 노트를 만들거나 검색 조건을 바꿔 보세요."))

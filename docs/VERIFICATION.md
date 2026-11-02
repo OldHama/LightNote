@@ -140,3 +140,8 @@
 
 - Removed the editor toolbar New/Open buttons; Library, Save and Help remain. File menu and Command-N/O are unchanged.
 - Universal release build, installation and Sparkle signature verification passed. This UI-only removal did not add tests or change document logic.
+
+## v0.15.8 — new-note card in library
+
+- Added a final full-cell clickable plus card to the library grid, including empty/search/favorite views. It uses the existing busy-guarded createNote operation for the current folder. Hover tint, tooltip and accessibility label are provided.
+- Signed universal release on arm64: NOTE_LIBRARY_TEST_PASSED (including current-folder note creation). Inspected /tmp/lightnote-library-preview.png: plus card matches note thumbnail dimensions and aligns with labels. No automated physical card-click test added.
