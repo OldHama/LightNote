@@ -157,3 +157,11 @@
 
 - Removed the top-right New menu. The grid's plus card now opens its three existing actions: new blank note, portrait A4 student consultation, and new folder. Uses button menu style so the full custom card label remains visible; native borderless menu style collapsed it to text during visual QA and was corrected.
 - Debug and signed universal release on arm64: NOTE_LIBRARY_TEST_PASSED; inspected rendered library with upper control absent and full-size card retained. Document/template/folder creation operations are unchanged. Menu pop-up interaction was not independently automated.
+
+## v0.15.11 — native tab interaction and liquid lens
+
+- Replaced the simulated SwiftUI glass/gradient/matched-geometry scope picker with an AppKit NSSegmentedControl bridge. macOS 27 uses the public tabs role; macOS 26 uses capsule/extra-large sizing and native older-system controls remain available. Disabled state, selected segment, binding updates and accessibility are delegated to AppKit. Compact hosting metrics are explicitly disabled on supported systems.
+- Signed universal release on arm64: NOTE_LIBRARY_TEST_PASSED. A separately identified isolated preview bundle was inspected with live computer-use capture. Click changed the selection and filtered the list from 2 notes to 1 favorite; dragging from the selected All Notes segment onto Favorites also changed the selected accessibility value and list to the favorite. Personal notes were not used.
+- NSView.cacheDisplay renders the native composited selection layer black; this is an offscreen capture limitation. Live window capture showed the selected label and native material correctly. Native animation/optics vary by macOS; no pixel-identical GIF claim. Intel/older macOS compiled but not run.
+- Optional --glass-preview with --self-test --library-self-test retains the isolated fixture for 90 seconds for live UI inspection.
+- References: https://developer.apple.com/documentation/appkit/nssegmentedcontrol and the macOS 27.2 SDK role/compact-metrics declarations.

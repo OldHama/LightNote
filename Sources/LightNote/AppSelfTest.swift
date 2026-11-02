@@ -1661,6 +1661,7 @@ extension AppSelfTest {
         }
         try await Task.sleep(for:.milliseconds(150))
         window.contentView!.layoutSubtreeIfNeeded()
+        if CommandLine.arguments.contains("--glass-preview") { try await Task.sleep(for:.seconds(90)) }
         let bitmap = window.contentView!.bitmapImageRepForCachingDisplay(in:window.contentView!.bounds)!
         window.contentView!.cacheDisplay(in:window.contentView!.bounds,to:bitmap)
         try bitmap.representation(using:.png,properties:[:])!.write(to:URL(fileURLWithPath:"/tmp/lightnote-library-preview.png"))
