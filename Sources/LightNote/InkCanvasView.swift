@@ -928,9 +928,11 @@ final class InkCanvasView: NSView {
                 guard !selectedIDs.isEmpty else { return }
                 finishStroke(reason: "selection-delete")
                 let ids = selectedIDs
+                let deletesInk = state.note.strokes.contains { ids.contains($0.id) && !$0.isLocked }
                 if !selectionContainsLocked { clearSelection() }
                 state.document?.eraseStrokes(ids: ids)
                 state.document?.undoManager?.setActionName("선택 삭제")
+                if deletesInk { state.selectTool(.pen) }
                 return
             }
             if let preset = NoteState.colorPresets.first(where: { $0.key == event.charactersIgnoringModifiers }) {

@@ -112,3 +112,8 @@
 - Editor windows route unmodified physical tool/color/selection keys to their own canvas when a toolbar control or hosting root owns the responder. Command menu shortcuts retain AppKit routing; text editors, attached sheets, and modal windows are excluded.
 - Native focus regression sends events through NSApp after another-window and Finder activation, then with toolbar/root responders; text editing still receives `e` without changing tools.
 - Debug and signed universal release on arm64: DRAWING_FOCUS_TEST_PASSED and APP_SELF_TEST_PASSED. Intel compiled but not run. No real Apple Pencil/Sidecar reconnection test was performed.
+
+## v0.15.3 — return to pen after selection deletion
+
+- Backspace/Delete switches to pen after removing an editable selection. Empty or entirely locked selections do not switch tools.
+- Signed universal release on arm64: APP_SELF_TEST_PASSED, including return-to-pen/selection cleared assertion, exact deletion Undo/Redo, and locked-object protection.

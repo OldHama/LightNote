@@ -150,6 +150,7 @@ enum AppSelfTest {
             characters: "\u{7f}", charactersIgnoringModifiers: "\u{7f}", isARepeat: false, keyCode: 51)!
         begin(); canvas.keyDown(with: backspace); end()
         try expect(doc.state.note.strokes == Array(beforeSelection.dropFirst(20)), "Backspace deleted wrong selection")
+        try expect(doc.state.tool == .pen && !doc.state.hasSelection, "Selection deletion did not return to pen")
         doc.undoInk(nil)
         try expect(doc.state.note.strokes == beforeSelection, "Selection delete undo not exact")
         doc.redoInk(nil)
