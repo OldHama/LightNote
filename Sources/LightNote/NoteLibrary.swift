@@ -32,6 +32,7 @@ final class NoteLibrary: ObservableObject {
     @Published private(set) var loading = false
     @Published var busy = false
     @Published var errorMessage: String?
+    var didOpenNote: (() -> Void)?
     private var renderTask: Task<Void,Never>?
     private var generation = UUID()
     init(root: URL, defaults: UserDefaults, trash: ((URL) throws -> Void)? = nil) {
@@ -154,11 +155,13 @@ final class NoteLibrary: ObservableObject {
             note.state.refresh()
             note.makeWindowControllers()
             note.showWindows(); refresh()
+            didOpenNote?()
         } catch { note.updateChangeCount(.changeCleared); note.close(); throw error }
     }
     func open(_ card: Card) {
-        NSDocumentController.shared.openDocument(withContentsOf:card.url,display:true) { _,_,error in
+        NSDocumentController.shared.openDocument(withContentsOf:card.url,display:true) { [weak self] document,_,error in
             if let error { NSApp.presentError(error) }
+            else if document != nil { self?.didOpenNote?() }
         }
     }
     func rename(_ card: Card, to name: String) async throws {
@@ -248,19 +251,22 @@ final class NoteLibrary: ObservableObject {
 @MainActor
 final class NoteLibraryWindowController: NSWindowController, NSWindowDelegate {
     static let shared = NoteLibraryWindowController()
-    init() {
+    private let library: NoteLibrary
+    init(library: NoteLibrary = .shared) {
+        self.library = library
         let window = NSWindow(contentRect:NSRect(x:0,y:0,width:980,height:680),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
         window.title = "노트 보관함"; window.minSize = NSSize(width:720,height:480)
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView:NoteLibraryView(library:.shared))
+        window.contentView = NSHostingView(rootView:NoteLibraryView(library:library))
         super.init(window:window); window.delegate = self; window.center()
+        library.didOpenNote = { [weak self] in self?.close() }
     }
     required init?(coder:NSCoder) { fatalError("init(coder:) has not been implemented") }
-    func windowDidBecomeKey(_ notification: Notification) { NoteLibrary.shared.refresh() }
+    func windowDidBecomeKey(_ notification: Notification) { library.refresh() }
     func present() {
         let alreadyKey = window?.isKeyWindow == true
         showWindow(nil); window?.makeKeyAndOrderFront(nil)
-        if alreadyKey { NoteLibrary.shared.refresh() }
+        if alreadyKey { library.refresh() }
     }
 }
 

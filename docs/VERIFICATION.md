@@ -165,3 +165,9 @@
 - NSView.cacheDisplay renders the native composited selection layer black; this is an offscreen capture limitation. Live window capture showed the selected label and native material correctly. Native animation/optics vary by macOS; no pixel-identical GIF claim. Intel/older macOS compiled but not run.
 - Optional --glass-preview with --self-test --library-self-test retains the isolated fixture for 90 seconds for live UI inspection.
 - References: https://developer.apple.com/documentation/appkit/nssegmentedcontrol and the macOS 27.2 SDK role/compact-metrics declarations.
+
+## v0.15.12 — dismiss library after opening a document
+
+- NoteLibrary emits a successful-open callback after creating/saving/showing a blank/template document or after NSDocumentController completes an open without error. The owning library controller closes its window; folder creation/navigation do not dismiss it. Failures keep the library open.
+- Library controller accepts its model explicitly so regression tests use an isolated temporary library/window instead of personal notes.
+- Signed universal release on arm64: NOTE_LIBRARY_TEST_PASSED. Added actual library-window visibility assertions after blank creation, re-opening an existing document, loading a closed note from disk, and consultation-template creation; the fixture reopens the library between actions. Existing library save/move/rename/favorites tests also passed. Error-dialog interaction was not automated.

@@ -1568,12 +1568,34 @@ extension AppSelfTest {
         library.favoritesOnly = false; library.query = "알고리즘"
         try expect(library.visibleCards.count == 1,"Global search missed nested note")
         library.query = ""; library.directory = lesson
+        let libraryController = NoteLibraryWindowController(library:library)
+        defer { libraryController.close() }
+        libraryController.present()
         try await library.createNote()
+        try expect(libraryController.window?.isVisible == false,"Library stayed open after creating a note")
         guard let newCard = library.cards.first(where:{$0.name.hasPrefix("새 노트")}) else { throw Failure(message:"New note missing from library") }
         try expect(newCard.url.deletingLastPathComponent().path == lesson.path && NSDocumentController.shared.document(for:newCard.url) != nil,
                    "New note was not created/opened in current folder")
+        libraryController.present()
+        library.open(newCard)
+        for _ in 0..<200 {
+            if libraryController.window?.isVisible == false { break }
+            try await Task.sleep(for:.milliseconds(10))
+        }
+        try expect(libraryController.window?.isVisible == false,"Library stayed open after opening a note")
+        libraryController.present()
+        library.open(card)
+        for _ in 0..<200 {
+            if libraryController.window?.isVisible == false { break }
+            try await Task.sleep(for:.milliseconds(10))
+        }
+        try expect(libraryController.window?.isVisible == false && NSDocumentController.shared.document(for:card.url) != nil,
+                   "Library did not close after loading a note from disk")
+        NSDocumentController.shared.document(for:card.url)?.close()
         try await library.delete(newCard)
+        libraryController.present()
         try await library.createNote(template:.studentConsultation)
+        try expect(libraryController.window?.isVisible == false,"Library stayed open after creating a consultation note")
         guard let consultationCard = library.cards.first(where:{$0.name == "학생 신규 상담"}),
               let consultation = NSDocumentController.shared.document(for:consultationCard.url) as? NoteDocument else {
             throw Failure(message:"Consultation template note was not created/opened")
