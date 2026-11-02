@@ -18,7 +18,7 @@ struct LightNoteMain {
             arguments["ApplePersistenceIgnoreState"] = true
             UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         }
-        let focusReturnApp = (CommandLine.arguments.contains("--focus-self-test") || CommandLine.arguments.contains("--toolbar-self-test")) ? NSWorkspace.shared.frontmostApplication : nil
+        let focusReturnApp = (CommandLine.arguments.contains("--focus-self-test") || CommandLine.arguments.contains("--toolbar-self-test") || CommandLine.arguments.contains("--library-self-test")) ? NSWorkspace.shared.frontmostApplication : nil
         let application = NSApplication.shared
         let delegate = AppDelegate()
         delegate.focusTestReturnApplication = focusReturnApp
@@ -63,6 +63,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
             Task { @MainActor in
                 do { try await AppSelfTest.runRecoveryProcess() }
                 catch { fputs("RECOVERY_PROCESS_FAILED: \(error)\n", stderr); exit(1) }
+            }
+            return
+        }
+        if CommandLine.arguments.contains("--library-self-test") {
+            Task { @MainActor in
+                do { try await AppSelfTest.testNoteLibrary(returnTo:focusTestReturnApplication); print("NOTE_LIBRARY_TEST_PASSED"); exit(0) }
+                catch { fputs("NOTE_LIBRARY_TEST_FAILED: \(error)\n",stderr); exit(1) }
             }
             return
         }
@@ -151,6 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         updaterController.updater.automaticallyDownloadsUpdates = AppPreferences.shared.automaticDownloads
     }
     private var activeNote: NoteDocument? {
+        if NSApp.keyWindow?.windowController is NoteLibraryWindowController { return nil }
         if let settingsWindow = preferencesController?.window, NSApp.keyWindow === settingsWindow { return nil }
         return (NSApp.keyWindow?.windowController?.document as? NoteDocument)
             ?? (NSApp.mainWindow?.windowController?.document as? NoteDocument)
@@ -181,6 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
         activeNote?.state.duplicateInk?()
     }
+    @objc func showNoteLibrary(_ sender: Any?) { NoteLibraryWindowController.shared.present() }
     @objc func copySelectionPNG(_ sender: Any?) { activeNote?.state.copySelectionPNG?() }
     @objc func exportSelectionPNG(_ sender: Any?) { activeNote?.state.exportSelectionPNG?() }
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
@@ -296,6 +305,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         app.addItem(.separator())
         item(app, "LightNote 종료", #selector(NSApplication.terminate(_:)), "q")
         let file = submenu("파일")
+        item(file, "노트 보관함…", #selector(showNoteLibrary(_:)), "")
+        file.items.last?.target = self
         item(file, "새 노트", #selector(NSDocumentController.newDocument(_:)), "n")
         item(file, "열기…", #selector(NSDocumentController.openDocument(_:)), "o")
         file.addItem(.separator())

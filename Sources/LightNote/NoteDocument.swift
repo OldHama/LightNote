@@ -457,6 +457,11 @@ final class NoteDocument: NSDocument {
             }
         }
     }
+    func libraryDidMove(from previous: URL) throws {
+        if let current = fileURL { try journal?.retarget(to:current) }
+        diskStamp.withLock { $0 = nil }
+        rememberReplacement(from:previous)
+    }
     private func rememberReplacement(from previous: URL?) {
         guard !CommandLine.arguments.contains("--self-test"), let previous, let current = fileURL else { return }
         let key = LightNoteDocumentController.lastDocumentKey

@@ -20,6 +20,8 @@ struct EditorView: View {
             HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 14) {
+                    Button { NoteLibraryWindowController.shared.present() } label: { Label("보관함",systemImage:"square.grid.2x2") }
+                        .topTooltip("노트 보관함").accessibilityLabel("노트 보관함")
                     Button { NSDocumentController.shared.newDocument(nil) } label: { Image(systemName: "doc.badge.plus") }
                         .topTooltip("새 노트 · ⌘N").accessibilityLabel("새 노트")
                     Button { NSDocumentController.shared.openDocument(nil) } label: { Image(systemName: "folder") }

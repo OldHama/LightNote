@@ -1451,3 +1451,105 @@ extension AppSelfTest {
 
     }
 }
+
+
+extension AppSelfTest {
+    static func testNoteLibrary(returnTo original: NSRunningApplication?) async throws {
+        func expect(_ value: @autoclosure () -> Bool, _ message: String) throws { if !value() { throw Failure(message:message) } }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("LightNote-library-"+UUID().uuidString)
+        let root = folder.appendingPathComponent("Notes")
+        let trash = folder.appendingPathComponent("Trash")
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        try FileManager.default.createDirectory(at:trash,withIntermediateDirectories:true)
+        defer { try? FileManager.default.removeItem(at:folder) }
+        let suite = "com.lightnote.library-test." + UUID().uuidString
+        let defaults = UserDefaults(suiteName:suite)!
+        defer { defaults.removePersistentDomain(forName:suite) }
+        let library = NoteLibrary(root:root,defaults:defaults,trash:{ url in try FileManager.default.moveItem(at:url,to:trash.appendingPathComponent(url.lastPathComponent)) })
+        let alpha = root.appendingPathComponent("Alpha.lightnote"), beta = root.appendingPathComponent("Beta.lightnote")
+        let rectangle = InkStroke.shape(.rectangle,from:CGPoint(x:80,y:120),to:CGPoint(x:680,y:390),constrained:false,color:.blue,width:5)!
+        let arrow = InkStroke.shape(.arrow,from:CGPoint(x:180,y:470),to:CGPoint(x:560,y:700),constrained:false,color:.red,width:5)!
+        let content = NoteFile(strokes:[rectangle,arrow])
+        try content.encoded().write(to:alpha)
+        try NoteFile(strokes:[arrow]).encoded().write(to:beta)
+        let broken = root.appendingPathComponent("Broken.lightnote")
+        try Data("broken note".utf8).write(to:broken)
+        library.refresh(); await library.waitForPreviews()
+        try expect(library.cards.count == 3 && library.cards.filter{!$0.unreadable}.allSatisfy{$0.preview != nil},"Library scan/previews failed")
+        try expect(library.cards.first{$0.url == broken}!.unreadable,"Corrupt note was not marked")
+        library.query = "ALPHA"
+        try expect(library.visibleCards.count == 1,"Library case-insensitive search failed")
+        library.query = ""; library.sort = .name
+        try expect(library.visibleCards.map(\.name) == ["Alpha","Beta","Broken"],"Library name sort failed")
+        library.toggleFavorite(alpha)
+        let reloaded = NoteLibrary(root:root,defaults:defaults)
+        try expect(reloaded.favorites.contains(alpha.path),"Favorite did not persist")
+        try library.createFolder(name:"수업")
+        let lesson = root.appendingPathComponent("수업")
+        var card = library.cards.first{$0.url == alpha}!
+        try await library.move(card,to:lesson.appendingPathComponent(alpha.lastPathComponent))
+        card = library.cards.first{$0.name == "Alpha"}!
+        try await library.rename(card,to:"알고리즘 수업")
+        card = library.cards.first{$0.name == "알고리즘 수업"}!
+        try expect(library.favorites.contains(card.id) && !library.favorites.contains(alpha.path),"Rename did not retarget favorite")
+        library.favoritesOnly = true
+        try expect(library.visibleCards.count == 1,"Favorite filter missed a note in a folder")
+        library.favoritesOnly = false; library.query = "알고리즘"
+        try expect(library.visibleCards.count == 1,"Global search missed nested note")
+        library.query = ""; library.directory = lesson
+        try await library.createNote()
+        guard let newCard = library.cards.first(where:{$0.name.hasPrefix("새 노트")}) else { throw Failure(message:"New note missing from library") }
+        try expect(newCard.url.deletingLastPathComponent().path == lesson.path && NSDocumentController.shared.document(for:newCard.url) != nil,
+                   "New note was not created/opened in current folder")
+        try await library.delete(newCard)
+        let duplicated = try await library.duplicate(card)
+        let duplicatedContent = try NoteFile.decode(Data(contentsOf:duplicated))
+        try expect(duplicatedContent == content,"Library duplicate changed content")
+        let duplicateCard = library.cards.first{$0.url == duplicated}!
+        do { try await library.rename(duplicateCard,to:card.name); throw Failure(message:"Rename overwrote existing note") }
+        catch is Failure { throw Failure(message:"Rename overwrote existing note") } catch {}
+        try await library.delete(duplicateCard)
+        try expect(!FileManager.default.fileExists(atPath:duplicated.path) && FileManager.default.fileExists(atPath:trash.appendingPathComponent(duplicated.lastPathComponent).path),"Library delete did not use trash")
+        let document = try NoteDocument(contentsOf:beta,ofType:"com.lightnote.note")
+        NSDocumentController.shared.addDocument(document)
+        document.makeWindowControllers(); document.undoManager?.groupsByEvent = false
+        document.undoManager?.beginUndoGrouping()
+        document.append(InkStroke(samples:[InkSample(x:100,y:800,time:1)]))
+        document.undoManager?.endUndoGrouping()
+        let edited = document.state.note
+        let betaCard = library.cards.first{$0.url == beta}!
+        defaults.set(beta.path,forKey:LightNoteDocumentController.lastDocumentKey)
+        try await library.rename(betaCard,to:"열린 노트")
+        let movedURL = root.appendingPathComponent("열린 노트.lightnote")
+        try expect(document.fileURL == movedURL && defaults.string(forKey:LightNoteDocumentController.lastDocumentKey) == movedURL.path,"Open rename did not update document/last path")
+        let movedContent = try NoteFile.decode(Data(contentsOf:movedURL))
+        try expect(movedContent == edited,"Open rename lost pending input")
+        let movedCard = library.cards.first{$0.url == movedURL}!
+        try await library.delete(movedCard)
+        try expect(NSDocumentController.shared.document(for:movedURL) == nil,"Deleting open note did not close document")
+        let trashedContent = try NoteFile.decode(Data(contentsOf:trash.appendingPathComponent(movedURL.lastPathComponent)))
+        try expect(trashedContent == edited,"Trash lost open edits")
+        library.directory = root
+        try FileManager.default.removeItem(at:broken)
+        try content.encoded().write(to:root.appendingPathComponent("알고리즘 필기.lightnote"))
+        var exercise = NoteFile(strokes:[rectangle]); exercise.paperStyle = .blank
+        try exercise.encoded().write(to:root.appendingPathComponent("수업 연습장.lightnote"))
+        library.refresh(); await library.waitForPreviews()
+        try expect(library.pathTitle == "모든 노트" && library.visibleCards.count == 2 && library.visibleFolders.count == 1,
+                   "Returning to root lost notes or showed an absolute path")
+        let window = NSWindow(contentRect:NSRect(x:100,y:100,width:960,height:660),styleMask:[.titled,.closable],backing:.buffered,defer:false)
+        window.isReleasedWhenClosed = false
+        window.title = "노트 보관함 화면 검사"
+        window.contentView = NSHostingView(rootView:NoteLibraryView(library:library))
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.close()
+            if let original, original.processIdentifier != ProcessInfo.processInfo.processIdentifier { NSApp.yieldActivation(to:original); original.activate(options:[]) }
+        }
+        try await Task.sleep(for:.milliseconds(150))
+        window.contentView!.layoutSubtreeIfNeeded()
+        let bitmap = window.contentView!.bitmapImageRepForCachingDisplay(in:window.contentView!.bounds)!
+        window.contentView!.cacheDisplay(in:window.contentView!.bounds,to:bitmap)
+        try bitmap.representation(using:.png,properties:[:])!.write(to:URL(fileURLWithPath:"/tmp/lightnote-library-preview.png"))
+    }
+}
