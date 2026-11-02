@@ -117,3 +117,9 @@
 
 - Backspace/Delete switches to pen after removing an editable selection. Empty or entirely locked selections do not switch tools.
 - Signed universal release on arm64: APP_SELF_TEST_PASSED, including return-to-pen/selection cleared assertion, exact deletion Undo/Redo, and locked-object protection.
+
+## v0.15.4 — activate the app from background drawing
+
+- Drawing now requests running-app activation as well as app activation, then reapplies the owning window/responder after 0/80/250 ms. Active drag and pressure-positive tablet events also recover focus. Retries are bounded and scoped to the initiating app/document, skip text editors, sheets, modal dialogs and switches to a third app/another LightNote window.
+- Signed universal release on arm64: CHROME_DRAWING_ACTIVATION_PASSED, DRAWING_FOCUS_TEST_PASSED and APP_SELF_TEST_PASSED. The focus test activates real running Chrome/Finder, delivers synthetic canvas input, checks frontmost process/key window/responder, simulates a responder reset during activation and verifies text retains focus beyond the retry period.
+- No physical Apple Pencil/Sidecar test; OS event delivery from that hardware remains a manual check. No user app was terminated or restarted.

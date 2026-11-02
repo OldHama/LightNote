@@ -349,14 +349,44 @@ final class InkCanvasView: NSView {
         needsDisplay = true
     }
 
+    private var focusRequest = UUID()
     private func focusForDrawing() {
-        guard let window else { return }
-        // acceptsFirstMouse permits background ink input but does not activate the app.
-        // Activate and select this document before assigning its keyboard responder.
-        if !NSApp.isActive { NSApp.activate(ignoringOtherApps: true) }
-        if !window.isKeyWindow { window.makeKeyAndOrderFront(nil) }
-        if !window.isMainWindow { window.makeMain() }
-        if window.firstResponder !== self { window.makeFirstResponder(self) }
+        guard let window, window.attachedSheet == nil, NSApp.modalWindow == nil else { return }
+        if NSApp.isActive, window.isKeyWindow, window.firstResponder === self { return }
+        let request = UUID()
+        focusRequest = request
+        let sourcePID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        func acquire() {
+            if !NSApp.isActive {
+                // App activation and key-window assignment are separate asynchronous operations.
+                NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
+                NSApp.activate()
+            }
+            window.makeKeyAndOrderFront(nil)
+            window.makeMain()
+            window.makeFirstResponder(self)
+        }
+        acquire()
+        // A tablet/Sidecar first-mouse event may be delivered before activation finishes.
+        // Reapply the responder after that event, but never follow a switch to a third app.
+        for delay in [0.0, 0.08, 0.25] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak window] in
+                guard let self, let window, self.window === window,
+                      self.focusRequest == request, window.isVisible,
+                      window.attachedSheet == nil, NSApp.modalWindow == nil,
+                      !(window.firstResponder is NSText), !(window.firstResponder is NSTextField) else { return }
+                let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+                guard front == sourcePID || front == ProcessInfo.processInfo.processIdentifier else { return }
+                guard NSApp.keyWindow == nil || NSApp.keyWindow === window || !NSApp.isActive else { return }
+                if !NSApp.isActive {
+                    NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
+                    NSApp.activate()
+                }
+                window.makeKeyAndOrderFront(nil)
+                window.makeMain()
+                window.makeFirstResponder(self)
+            }
+        }
     }
     override func mouseDown(with event: NSEvent) {
         guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
@@ -418,6 +448,7 @@ final class InkCanvasView: NSView {
         append(event)
     }
     override func mouseDragged(with event: NSEvent) {
+        focusForDrawing()
         if shapeDraft != nil { updateShape(with: event); return }
         if activeLaser != nil { appendLaser(event); return }
         if marqueeStart != nil || moveStart != nil || resizeDrag != nil { updateSelection(with: event); return }
@@ -456,6 +487,7 @@ final class InkCanvasView: NSView {
     }
     override func tabletPoint(with event: NSEvent) {
         // AppKit may deliver independent tablet-point events between mouse events.
+        if event.pressure > 0 { focusForDrawing() }
         if shapeDraft != nil { updateShape(with: event); return }
         if activeLaser != nil { appendLaser(event); return }
         if marqueeStart != nil || moveStart != nil || resizeDrag != nil { updateSelection(with: event); return }

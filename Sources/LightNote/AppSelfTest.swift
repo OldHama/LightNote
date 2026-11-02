@@ -1359,6 +1359,20 @@ extension AppSelfTest {
         guard window.isMainWindow, doc.state.note.strokes.count == 2,
               doc.state.note.strokes.last!.samples.first!.point == CGPoint(x:100,y:100),
               doc.state.note.strokes.last!.samples.last!.point == CGPoint(x:160,y:120) else { throw Failure(message:"First cross-app stroke was interrupted") }
+        if let chrome = NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome").first {
+            chrome.activate(options: [])
+            try await waitFor { NSWorkspace.shared.frontmostApplication?.processIdentifier == chrome.processIdentifier && !NSApp.isActive }
+            doc.undoManager?.beginUndoGrouping()
+            canvas.mouseDown(with:event(.leftMouseDown,CGPoint(x:180,y:130),8))
+            // Simulate AppKit assigning the hosting/root responder during activation.
+            window.makeFirstResponder(window)
+            canvas.mouseDragged(with:event(.leftMouseDragged,CGPoint(x:200,y:140),9))
+            try await waitFor { NSApp.isActive && window.isKeyWindow && window.firstResponder === canvas && NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier }
+            canvas.mouseUp(with:event(.leftMouseUp,CGPoint(x:220,y:150),10))
+            doc.undoManager?.endUndoGrouping()
+            guard doc.state.note.strokes.count == 3 else { throw Failure(message:"Chrome activation lost first stroke") }
+            print("CHROME_DRAWING_ACTIVATION_PASSED")
+        }
         let key=NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:[],timestamp:7,windowNumber:window.windowNumber,context:nil,characters:"e",charactersIgnoringModifiers:"e",isARepeat:false,keyCode:14)!
         NSApp.sendEvent(key)
         guard doc.state.tool == .eraser, window.firstResponder === canvas else { throw Failure(message:"Canvas shortcuts did not follow focus") }
@@ -1380,6 +1394,7 @@ extension AppSelfTest {
         window.makeFirstResponder(text)
         doc.state.selectTool(.pen)
         NSApp.sendEvent(key)
+        try await Task.sleep(for: .milliseconds(350))
         guard doc.state.tool == .pen, text.string == "e", window.firstResponder === text else {
             throw Failure(message: "Canvas shortcut intercepted text editing")
         }
