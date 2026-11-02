@@ -205,7 +205,7 @@ final class NoteDocument: NSDocument {
         }
         do { try ensureJournal() } catch { reportRecoveryError(error) }
         let root = EditorView(state: state)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1080, height: 820),
+        let window = NoteEditorWindow(contentRect: NSRect(x: 0, y: 0, width: 1080, height: 820),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
         window.isRestorable = false
@@ -555,5 +555,37 @@ final class NoteWindowController: NSWindowController {
     }
     override func windowTitle(forDocumentDisplayName displayName: String) -> String {
         Self.readableTitle(for: document?.fileURL)
+    }
+}
+
+/// SwiftUI controls and sheet dismissal can leave the hosting view as the responder.
+/// Route canvas shortcuts at the owning window, without intercepting text entry or menus.
+@MainActor
+final class NoteEditorWindow: NSWindow {
+    private func canvas(in view: NSView?) -> InkCanvasView? {
+        guard let view else { return nil }
+        if let canvas = view as? InkCanvasView { return canvas }
+        for child in view.subviews {
+            if let found = canvas(in: child) { return found }
+        }
+        return nil
+    }
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown || event.type == .flagsChanged,
+           isKeyWindow, attachedSheet == nil, NSApp.modalWindow == nil,
+           !(firstResponder is NSText), !(firstResponder is NSTextField),
+           let canvas = canvas(in: contentView), firstResponder !== canvas {
+            let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+            let keys: Set<UInt16> = [0, 8, 9, 12, 14, 15, 18, 19, 20, 21, 22, 23, 25, 26, 28, 29, 30, 33, 35, 37, 44, 51, 53, 117]
+            if event.type == .keyDown, modifiers.isEmpty, keys.contains(event.keyCode) {
+                makeFirstResponder(canvas)
+                canvas.keyDown(with: event)
+                return
+            }
+            if event.type == .flagsChanged {
+                canvas.flagsChanged(with: event)
+            }
+        }
+        super.sendEvent(event)
     }
 }

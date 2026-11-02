@@ -1361,6 +1361,29 @@ extension AppSelfTest {
         let key=NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:[],timestamp:7,windowNumber:window.windowNumber,context:nil,characters:"e",charactersIgnoringModifiers:"e",isARepeat:false,keyCode:14)!
         NSApp.sendEvent(key)
         guard doc.state.tool == .eraser, window.firstResponder === canvas else { throw Failure(message:"Canvas shortcuts did not follow focus") }
+        // Reproduce focus left on a toolbar control / hosting root after sheet dismissal.
+        let button = NSButton(title: "Toolbar", target: nil, action: nil)
+        button.frame = NSRect(x: 0, y: 0, width: 80, height: 24)
+        canvas.addSubview(button)
+        for responder: NSResponder in [button, window] {
+            window.makeFirstResponder(responder)
+            guard window.firstResponder !== canvas else { throw Failure(message: "Focus fixture did not leave canvas") }
+            doc.state.selectTool(.pen)
+            NSApp.sendEvent(key)
+            guard doc.state.tool == .eraser, window.firstResponder === canvas else {
+                throw Failure(message: "Toolbar/root responder swallowed canvas shortcut")
+            }
+        }
+        let text = NSTextView(frame: NSRect(x: 0, y: 30, width: 100, height: 30))
+        canvas.addSubview(text)
+        window.makeFirstResponder(text)
+        doc.state.selectTool(.pen)
+        NSApp.sendEvent(key)
+        guard doc.state.tool == .pen, text.string == "e", window.firstResponder === text else {
+            throw Failure(message: "Canvas shortcut intercepted text editing")
+        }
+        window.makeFirstResponder(canvas)
+
     }
 }
 
