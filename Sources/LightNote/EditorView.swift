@@ -34,7 +34,10 @@ struct EditorView: View {
                         .disabled(!state.canRedo).topTooltip("다시 실행 · ⌘⇧Z").accessibilityLabel("다시 실행")
                     Divider().frame(height: 22)
                     DrawingToolStrip(state: state)
-                    Button { state.showStickers = true } label: { Label("스티커",systemImage:"face.smiling") }
+                    Button { state.showStickers = true } label: {
+                        Label("스티커",systemImage:"face.smiling").padding(.horizontal,12).frame(height:44).contentShape(Rectangle())
+                    }
+                        .buttonStyle(DrawingToolButtonStyle(tint:.accentColor))
                         .topTooltip("등록한 스티커 사용").accessibilityLabel("스티커함")
                     ColorPresetStrip(state: state)
                     ColorPicker("색상", selection: Binding(get: { Color(cgColor: state.color.cgColor) }, set: {
@@ -128,14 +131,15 @@ private struct FloppyDiskIcon: View {
 /// Contiguous full-size targets: the padding belongs to each Button's label.
 struct DrawingToolStrip: View {
     @ObservedObject var state: NoteState
+    @Environment(\.colorScheme) private var colorScheme
     private func tool(_ value: InkTool, help: String) -> some View {
         Button { state.selectTool(value) } label: {
             Image(systemName: value.symbol)
-                .foregroundStyle(state.tool == value ? (value == .laser ? Color.red : Color.accentColor) : Color.secondary)
+                .foregroundStyle(state.tool == value ? (value == .laser ? Color.red : Color.accentColor) : (colorScheme == .dark ? Color.white.opacity(0.72) : Color.black.opacity(0.65)))
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(DrawingToolButtonStyle(tint: value == .laser ? .red : .accentColor))
+        .buttonStyle(DrawingToolButtonStyle(tint: value == .laser ? .red : .accentColor,selected:state.tool == value))
         .topTooltip(help)
         .accessibilityLabel(value.title)
     }
@@ -149,7 +153,7 @@ struct DrawingToolStrip: View {
             tool(.rectangle, help: "사각형 · R · ⌘ 정사각형")
             tool(.freeArrow, help: "자유 화살표 · Q")
             tool(.arrow, help: "화살표 · A")
-        }
+        }.modifier(ToolbarGlassGroup())
     }
 }
 
@@ -168,36 +172,64 @@ struct ColorPresetStrip: View {
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(DrawingToolButtonStyle(tint: .accentColor))
+                .buttonStyle(DrawingToolButtonStyle(tint: .accentColor,selected:state.color == preset.color))
                 .topTooltip(preset.name + " · " + preset.key)
                 .accessibilityLabel(preset.name + " 펜")
             }
-        }
+        }.modifier(ToolbarGlassGroup())
     }
 }
 
-/// Keep the complete 44-point hit target; inset only the visual highlight.
+/// Keep one native glass container for neighboring controls to share the material.
+private struct ToolbarGlassGroup: ViewModifier {
+    @ViewBuilder func body(content:Content) -> some View {
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer(spacing:8) { content }
+        } else { content }
+    }
+}
+
+/// Glass is inset visually; the complete label remains a 44-point hit target.
 private struct DrawingToolButtonStyle: ButtonStyle {
     let tint: Color
+    var selected = false
     func makeBody(configuration: Configuration) -> some View {
-        HoverLabel(configuration: configuration, tint: tint)
+        HoverLabel(configuration:configuration,tint:tint,selected:selected)
     }
     private struct HoverLabel: View {
         let configuration: ButtonStyle.Configuration
         let tint: Color
+        let selected: Bool
         @State private var hovering = false
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
         var body: some View {
-            configuration.label
-                .background {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(tint.opacity(configuration.isPressed ? 0.24 : (hovering ? 0.13 : 0)))
-                        .padding(3)
-                }
+            glassLabel
                 .contentShape(Rectangle())
                 .onHover { hovering = $0 }
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovering)
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: configuration.isPressed)
+                .animation(reduceMotion ? nil : .easeOut(duration:0.16),value:hovering)
+                .animation(reduceMotion ? nil : .easeOut(duration:0.12),value:configuration.isPressed)
+                .animation(reduceMotion ? nil : .easeOut(duration:0.2),value:selected)
+        }
+        @ViewBuilder private var glassLabel: some View {
+            if #available(macOS 26.0, *), !reduceTransparency {
+                configuration.label.padding(-3)
+                    .glassEffect((selected ? Glass.regular.tint(tint.opacity(0.2)) : Glass.regular).interactive(),
+                                 in:RoundedRectangle(cornerRadius:12))
+                    .overlay {
+                        RoundedRectangle(cornerRadius:12)
+                            .strokeBorder(tint.opacity(selected ? 0.55 : 0),lineWidth:1)
+                    }.padding(3)
+            } else {
+                configuration.label.background {
+                    RoundedRectangle(cornerRadius:12)
+                        .fill(Color(nsColor:.controlBackgroundColor))
+                        .overlay(RoundedRectangle(cornerRadius:12)
+                            .fill(tint.opacity(configuration.isPressed ? 0.24 : (selected ? 0.18 : (hovering ? 0.1 : 0)))))
+                        .overlay(RoundedRectangle(cornerRadius:12).strokeBorder(tint.opacity(selected ? 0.55 : 0.12),lineWidth:1))
+                        .padding(3)
+                }
+            }
         }
     }
 }

@@ -171,3 +171,11 @@
 - NoteLibrary emits a successful-open callback after creating/saving/showing a blank/template document or after NSDocumentController completes an open without error. The owning library controller closes its window; folder creation/navigation do not dismiss it. Failures keep the library open.
 - Library controller accepts its model explicitly so regression tests use an isolated temporary library/window instead of personal notes.
 - Signed universal release on arm64: NOTE_LIBRARY_TEST_PASSED. Added actual library-window visibility assertions after blank creation, re-opening an existing document, loading a closed note from disk, and consultation-template creation; the fixture reopens the library between actions. Existing library save/move/rename/favorites tests also passed. Error-dialog interaction was not automated.
+
+## v0.15.13 — Liquid Glass drawing and palette buttons
+
+- Drawing tools, ten palette buttons and the sticker action use native interactive SwiftUI glassEffect on macOS 26+. Neighboring controls are grouped with GlassEffectContainer. Selected tool/color keeps an accent border/tint and the existing color ring; palette colors remain solid. Visual inset is 3pt while label/contentShape retain full 44pt targets. Upward tooltip and keyboard logic are unchanged.
+- Earlier macOS and Reduce Transparency use opaque control backgrounds with selected/hover feedback; Reduce Motion disables custom animations. Native optical details remain controlled by the OS.
+- Live isolated toolbar preview inspected with computer-use capture: native glass is applied to the whole button label so the material does not blur/occlude foreground icons or swatches. An initial background-only implementation visibly blurred them and was corrected before delivery.
+- Signed universal release on arm64: TOOLBAR_HIT_TEST_PASSED (16 tool-corner and 20 color-corner clicks, tooltip placement/dismissal and sticker UI regressions). Real display contrast checked in dark mode; fallback OS and accessibility settings compiled but not separately run. No physical Pencil test needed for this toolbar-only change.
+- --self-test --toolbar-self-test --glass-preview retains a temporary tools/palette fixture for live inspection.

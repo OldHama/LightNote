@@ -1485,6 +1485,17 @@ extension AppSelfTest {
             }
         }
 
+        if CommandLine.arguments.contains("--glass-preview") {
+            state.selectTool(.selection); state.color = .blue
+            window.title = "도구·색상 유리 버튼 검사"
+            window.setContentSize(NSSize(width:840,height:76))
+            window.contentView = NSHostingView(rootView:HStack(spacing:14) {
+                DrawingToolStrip(state:state)
+                ColorPresetStrip(state:state)
+            }.padding(12).background(.bar))
+            try await Task.sleep(for:.seconds(90))
+        }
+
         let stickerUIFolder = FileManager.default.temporaryDirectory.appendingPathComponent("LightNote-sticker-ui-"+UUID().uuidString)
         defer { try? FileManager.default.removeItem(at:stickerUIFolder) }
         let stickerUILibrary = StickerLibrary(directory:stickerUIFolder)
