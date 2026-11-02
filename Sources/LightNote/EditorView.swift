@@ -140,10 +140,7 @@ struct DrawingToolStrip: View {
     private var dropletIndex: Int? { toolOrder.firstIndex { $0 == (hoveredTool ?? state.tool) } }
     private func tool(_ value: InkTool, help: String) -> some View {
         Button { if !suppressClick { state.selectTool(value) } } label: {
-            Image(systemName: value.symbol)
-                .foregroundStyle(state.tool == value ? (value == .laser ? Color.red : Color.accentColor) : (colorScheme == .dark ? Color.white.opacity(0.72) : Color.black.opacity(0.65)))
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
+            Color.clear.frame(width:44,height:44).contentShape(Rectangle())
         }
         .buttonStyle(DrawingToolButtonStyle(tint: value == .laser ? .red : .accentColor,selected:state.tool == value))
         .topTooltip(help)
@@ -168,13 +165,13 @@ struct DrawingToolStrip: View {
         .coordinateSpace(name:"tool-drag")
         .simultaneousGesture(DragGesture(minimumDistance:3,coordinateSpace:.named("tool-drag"))
             .updating($dragLocation) { value, location, transaction in
-                transaction.animation = nil
+                transaction.animation = reduceMotion ? nil : .interactiveSpring(response:0.18,dampingFraction:0.86)
                 location = min(max(value.location.x,22),CGFloat(toolOrder.count)*44-22)
             }
             .onChanged { _ in suppressClick = true }
             .onEnded { value in
                 let index = min(max(Int(floor(value.location.x/44)),0),toolOrder.count-1)
-                withAnimation(reduceMotion ? nil : .spring(response:0.28,dampingFraction:0.72)) {
+                withAnimation(reduceMotion ? nil : .spring(response:0.26,dampingFraction:0.82)) {
                     state.selectTool(toolOrder[index]); hoveredTool = nil
                 }
                 DispatchQueue.main.async { suppressClick = false }
@@ -185,16 +182,25 @@ struct DrawingToolStrip: View {
         .overlay(alignment:.leading) {
             if let center = dragLocation ?? dropletIndex.map({ CGFloat($0)*44+22 }) {
                 ToolbarDroplet(tint:(hoveredTool ?? state.tool) == .laser ? .red : .accentColor)
-                    .frame(width:38,height:38)
-                    .scaleEffect(x:reduceMotion ? 1 : (dragLocation != nil ? 1.32 : (hoveredTool == nil ? 1 : 1.06)),
-                                 y:reduceMotion ? 1 : (dragLocation != nil ? 1.22 : 1))
-                    .offset(x:center-19)
+                    .frame(width:!reduceMotion && dragLocation != nil ? 42 : 38,
+                           height:!reduceMotion && dragLocation != nil ? 36 : 38)
+                    .offset(x:center - (!reduceMotion && dragLocation != nil ? 21 : 19))
                     .allowsHitTesting(false).accessibilityHidden(true)
             }
         }
-        .animation(reduceMotion ? nil : .spring(response:0.32,dampingFraction:0.68),value:dropletIndex)
+        .overlay {
+            HStack(spacing:0) {
+                ForEach(toolOrder.indices,id:\.self) { index in
+                    let value = toolOrder[index]
+                    Image(systemName:value.symbol)
+                        .foregroundStyle(state.tool == value ? (value == .laser ? Color.red : Color.accentColor) : (colorScheme == .dark ? Color.white.opacity(0.72) : Color.black.opacity(0.65)))
+                        .frame(width:44,height:44)
+                }
+            }.allowsHitTesting(false).accessibilityHidden(true)
+        }
+        .animation(reduceMotion ? nil : .spring(response:0.3,dampingFraction:0.82),value:dropletIndex)
         .animation(reduceMotion ? nil : .spring(response:0.24,dampingFraction:0.72),value:hoveredTool != nil)
-        .animation(reduceMotion ? nil : .spring(response:0.28,dampingFraction:0.72),value:dragLocation == nil)
+        .animation(reduceMotion ? nil : .spring(response:0.26,dampingFraction:0.82),value:dragLocation == nil)
     }
 }
 
@@ -214,12 +220,7 @@ struct ColorPresetStrip: View {
         HStack(spacing: 0) {
             ForEach(preferences.colorPresets, id: \.key) { preset in
                 Button { if !suppressClick { state.color = preset.color } } label: {
-                    Circle().fill(Color(cgColor: preset.color.cgColor))
-                        .frame(width: 19, height: 19)
-                        .padding(4)
-                        .overlay(Circle().stroke(state.color == preset.color ? Color.accentColor : .clear, lineWidth: 2))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
+                    Color.clear.frame(width:44,height:44).contentShape(Rectangle())
                 }
                 .buttonStyle(DrawingToolButtonStyle(tint: .accentColor,selected:state.color == preset.color))
                 .topTooltip(preset.name + " · " + preset.key)
@@ -234,13 +235,13 @@ struct ColorPresetStrip: View {
         .coordinateSpace(name:"palette-drag")
         .simultaneousGesture(DragGesture(minimumDistance:3,coordinateSpace:.named("palette-drag"))
             .updating($dragLocation) { value, location, transaction in
-                transaction.animation = nil
+                transaction.animation = reduceMotion ? nil : .interactiveSpring(response:0.18,dampingFraction:0.86)
                 location = min(max(value.location.x,22),CGFloat(preferences.colorPresets.count)*44-22)
             }
             .onChanged { _ in suppressClick = true }
             .onEnded { value in
                 let index = min(max(Int(floor(value.location.x/44)),0),preferences.colorPresets.count-1)
-                withAnimation(reduceMotion ? nil : .spring(response:0.28,dampingFraction:0.72)) {
+                withAnimation(reduceMotion ? nil : .spring(response:0.26,dampingFraction:0.82)) {
                     state.color = preferences.colorPresets[index].color
                     hoveredKey = nil
                 }
@@ -252,17 +253,26 @@ struct ColorPresetStrip: View {
         .overlay(alignment:.leading) {
             if let center = dragLocation ?? dropletIndex.map({ CGFloat($0)*44+22 }) {
                 ToolbarDroplet()
-                    .frame(width:38,height:38)
-                    .scaleEffect(x:reduceMotion ? 1 : (dragLocation != nil ? 1.32 : (hoveredKey == nil ? 1 : 1.06)),
-                                 y:reduceMotion ? 1 : (dragLocation != nil ? 1.22 : 1))
-                    .offset(x:center-19)
+                    .frame(width:!reduceMotion && dragLocation != nil ? 42 : 38,
+                           height:!reduceMotion && dragLocation != nil ? 36 : 38)
+                    .offset(x:center - (!reduceMotion && dragLocation != nil ? 21 : 19))
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
         }
-        .animation(reduceMotion ? nil : .spring(response:0.32,dampingFraction:0.68),value:dropletIndex)
+        .overlay {
+            HStack(spacing:0) {
+                ForEach(preferences.colorPresets,id:\.key) { preset in
+                    Circle().fill(Color(cgColor:preset.color.cgColor))
+                        .frame(width:19,height:19).padding(4)
+                        .overlay(Circle().stroke(state.color == preset.color ? Color.accentColor : .clear,lineWidth:2))
+                        .frame(width:44,height:44)
+                }
+            }.allowsHitTesting(false).accessibilityHidden(true)
+        }
+        .animation(reduceMotion ? nil : .spring(response:0.3,dampingFraction:0.82),value:dropletIndex)
         .animation(reduceMotion ? nil : .spring(response:0.24,dampingFraction:0.72),value:hoveredKey != nil)
-        .animation(reduceMotion ? nil : .spring(response:0.28,dampingFraction:0.72),value:dragLocation == nil)
+        .animation(reduceMotion ? nil : .spring(response:0.26,dampingFraction:0.82),value:dragLocation == nil)
     }
 }
 
@@ -270,16 +280,16 @@ private struct ToolbarDroplet: View {
     var tint: Color = .accentColor
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     var body: some View {
-        surface.overlay(Capsule().strokeBorder(
-            LinearGradient(colors:[.white.opacity(0.85), .white.opacity(0.08), .white.opacity(0.5)],
+        surface.overlay(RoundedRectangle(cornerRadius:12,style:.continuous).strokeBorder(
+            LinearGradient(colors:[.white.opacity(0.55), .white.opacity(0.05), .white.opacity(0.28)],
                            startPoint:.topLeading,endPoint:.bottomTrailing),lineWidth:1))
-            .shadow(color:tint.opacity(0.24),radius:5,y:1)
+            .shadow(color:tint.opacity(0.12),radius:3,y:1)
     }
     @ViewBuilder private var surface: some View {
         if #available(macOS 26.0, *), !reduceTransparency {
-            Capsule().fill(.clear).glassEffect(.clear,in:Capsule())
+            RoundedRectangle(cornerRadius:12,style:.continuous).fill(.clear).glassEffect(.clear,in:RoundedRectangle(cornerRadius:12,style:.continuous))
         } else {
-            Capsule().strokeBorder(Color.accentColor.opacity(0.7),lineWidth:2)
+            RoundedRectangle(cornerRadius:12,style:.continuous).strokeBorder(Color.accentColor.opacity(0.7),lineWidth:2)
         }
     }
 }
