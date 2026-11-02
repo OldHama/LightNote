@@ -21,17 +21,17 @@ struct EditorView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 14) {
                     Button { NoteLibraryWindowController.shared.present() } label: { Label("보관함",systemImage:"square.grid.2x2") }
-                        .topTooltip("노트 보관함").accessibilityLabel("노트 보관함")
+                        .topTooltip("노트 보관함").accessibilityLabel("노트 보관함").buttonStyle(ToolbarActionButtonStyle())
                     Button { state.finishInput?(); state.document?.save(nil) } label: { FloppyDiskIcon() }
-                        .topTooltip("저장 · ⌘S").accessibilityLabel("저장")
+                        .topTooltip("저장 · ⌘S").accessibilityLabel("저장").buttonStyle(ToolbarActionButtonStyle())
                     Button { state.showShortcuts = true } label: {
                         Image(systemName: "questionmark.circle")
-                    }.topTooltip("단축키 도움말 · /").accessibilityLabel("단축키 도움말")
+                    }.topTooltip("단축키 도움말 · /").accessibilityLabel("단축키 도움말").buttonStyle(ToolbarActionButtonStyle())
                     Divider().frame(height: 22)
                     Button { state.document?.undoInk(nil) } label: { Image(systemName: "arrow.uturn.backward") }
-                        .disabled(!state.canUndo).topTooltip("실행 취소 · ⌘Z").accessibilityLabel("실행 취소")
+                        .disabled(!state.canUndo).topTooltip("실행 취소 · ⌘Z").accessibilityLabel("실행 취소").buttonStyle(ToolbarActionButtonStyle())
                     Button { state.document?.redoInk(nil) } label: { Image(systemName: "arrow.uturn.forward") }
-                        .disabled(!state.canRedo).topTooltip("다시 실행 · ⌘⇧Z").accessibilityLabel("다시 실행")
+                        .disabled(!state.canRedo).topTooltip("다시 실행 · ⌘⇧Z").accessibilityLabel("다시 실행").buttonStyle(ToolbarActionButtonStyle())
                     Divider().frame(height: 22)
                     DrawingToolStrip(state: state)
                     Button { state.showStickers = true } label: {
@@ -177,6 +177,30 @@ struct ColorPresetStrip: View {
                 .accessibilityLabel(preset.name + " 펜")
             }
         }.modifier(ToolbarGlassGroup())
+    }
+}
+
+/// File/help/history actions share a spacious hover target without changing their actions.
+private struct ToolbarActionButtonStyle: ButtonStyle {
+    func makeBody(configuration:Configuration) -> some View { ActionLabel(configuration:configuration) }
+    private struct ActionLabel: View {
+        let configuration: ButtonStyle.Configuration
+        @State private var hovering = false
+        @Environment(\.isEnabled) private var enabled
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        var body: some View {
+            configuration.label
+                .foregroundStyle(.secondary)
+                .padding(.horizontal,10)
+                .frame(minWidth:40,minHeight:44)
+                .background(RoundedRectangle(cornerRadius:10)
+                    .fill(Color.primary.opacity(enabled ? (configuration.isPressed ? 0.15 : (hovering ? 0.08 : 0)) : 0)))
+                .contentShape(Rectangle())
+                .opacity(enabled ? 1 : 0.38)
+                .onHover { hovering = $0 }
+                .animation(reduceMotion ? nil : .easeOut(duration:0.12),value:hovering)
+                .animation(reduceMotion ? nil : .easeOut(duration:0.08),value:configuration.isPressed)
+        }
     }
 }
 

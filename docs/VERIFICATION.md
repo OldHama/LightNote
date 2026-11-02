@@ -196,3 +196,8 @@
 - Removed the refresh button. The library controller starts one five-second common-run-loop timer when presented, scans while visible/non-minimized and not busy, and invalidates the timer on window close. Reopening performs the usual immediate scan and restarts monitoring.
 - Periodic refresh compares note paths/modification dates and folder paths before canceling preview work or publishing view changes. Unchanged scans leave cards/previews untouched; changed files/folders trigger the existing refresh path. Scans can run while preview rendering is underway; mutations defer that tick.
 - Signed universal release on arm64: NOTE_LIBRARY_TEST_PASSED. A file written directly to the isolated current folder was discovered by the actual five-second timer (no explicit refresh), an unchanged scan emitted zero objectWillChange notifications, and a file added after closing remained undiscovered after 5.3 seconds. Existing document auto-dismiss/reopen, template and hover-render regressions passed. No real multi-device iCloud synchronization test was performed.
+
+## v0.15.17 — hover feedback for file/help/history actions
+
+- Library, Save, Help, Undo and Redo now use a shared rounded hover background and darker pressed background, with at least 40x44pt targets. Disabled history actions are dimmed and do not highlight; Reduce Motion removes custom transitions. Actions and shortcuts are unchanged.
+- Signed universal release on arm64: TOOLBAR_HIT_TEST_PASSED on retry. Initial synthetic toolbar run missed an existing eraser corner click; unchanged retry passed. The existing test covers drawing/color corner clicks and tooltips, not a dedicated animation capture for these five newly styled actions. No new tests were added for this visual-only style.
