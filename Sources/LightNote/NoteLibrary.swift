@@ -345,11 +345,13 @@ struct NoteLibraryView: View {
                                             ZStack { Color(nsColor:.controlBackgroundColor); Image(systemName:card.unreadable ? "exclamationmark.triangle" : "book.closed").font(.largeTitle).foregroundStyle(.secondary) }
                                         }
                                     }.frame(width:140,height:190).clipShape(RoundedRectangle(cornerRadius:7))
+                                        // Hover must animate the frame, never cross-fade the decoded preview.
+                                        .transaction { $0.animation = nil; $0.disablesAnimations = true }
                                         .overlay(RoundedRectangle(cornerRadius:7).strokeBorder(Color.primary.opacity(0.12)))
                                         .shadow(color:.black.opacity(0.12),radius:4,y:2)
                                         .overlay(RoundedRectangle(cornerRadius:7).strokeBorder(Color.accentColor.opacity(hoveredNote == card.id ? 0.9 : 0),lineWidth:2))
                                         .shadow(color:Color.accentColor.opacity(hoveredNote == card.id ? 0.38 : 0),radius:12,y:0)
-                                }.buttonStyle(.plain).accessibilityLabel(card.name + " 열기")
+                                }.buttonStyle(LibraryPreviewButtonStyle()).accessibilityLabel(card.name + " 열기")
                                 Button { library.toggleFavorite(card.url) } label: {
                                     Image(systemName:library.favorites.contains(card.id) ? "star.fill" : "star")
                                         .foregroundStyle(library.favorites.contains(card.id) ? Color.orange : Color.secondary)
@@ -370,7 +372,6 @@ struct NoteLibraryView: View {
                             if inside { hoveredNote = card.id }
                             else if hoveredNote == card.id { hoveredNote = nil }
                         })
-                        .animation(reduceMotion ? nil : .easeOut(duration:0.16),value:hoveredNote == card.id)
                         .contextMenu {
                             Button("열기") { library.open(card) }
                             Button("이름 변경…") { naming = card; name = card.name }
@@ -523,6 +524,11 @@ private struct LibraryCardHover: NSViewRepresentable {
         override func mouseMoved(with event:NSEvent) { report(true) }
         override func mouseExited(with event:NSEvent) { report(false) }
     }
+}
+
+/// Keep the note artwork at full brightness through pointer and press changes.
+private struct LibraryPreviewButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { configuration.label }
 }
 
 private struct FavoriteStarButtonStyle: ButtonStyle {
