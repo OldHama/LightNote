@@ -1455,7 +1455,7 @@ extension AppSelfTest {
 extension AppSelfTest {
     static func testToolbarHitAreas(returnTo original: NSRunningApplication?) async throws {
         let state = NoteState()
-        let window = NSWindow(contentRect:NSRect(x:150,y:150,width:352,height:58),styleMask:[.titled,.closable],backing:.buffered,defer:false)
+        let window = NoteEditorWindow(contentRect:NSRect(x:150,y:150,width:352,height:58),styleMask:[.titled,.closable],backing:.buffered,defer:false)
         window.isReleasedWhenClosed = false
         window.title = "도구 버튼 클릭 검사"
         window.contentView = NSHostingView(rootView:DrawingToolStrip(state:state).frame(width:352,height:58))
@@ -1477,6 +1477,20 @@ extension AppSelfTest {
             throw Failure(message:"Tools are not a native connected segmented bar")
         }
         if #available(macOS 27.0, *), toolControl.role != .tabs { throw Failure(message:"Tools do not use native tab lens interaction") }
+        state.selectTool(.pen)
+        try await Task.sleep(for:.milliseconds(350))
+        state.selectTool(.arrow)
+        try await Task.sleep(for:.milliseconds(70))
+        guard let slide = toolControl.superview?.subviews.first(where: { $0.identifier?.rawValue == "keyboard-selection-slide" }),
+              let presentation = slide.layer?.presentation(), presentation.frame.midX > 22, presentation.frame.midX < 330 else {
+            throw Failure(message:"Programmatic tool selection did not slide through an intermediate position")
+        }
+        state.selectTool(.ellipse)
+        try await Task.sleep(for:.milliseconds(350))
+        guard toolControl.selectedSegment == 4,
+              !(toolControl.superview?.subviews.contains(where: { $0.identifier?.rawValue == "keyboard-selection-slide" }) ?? false) else {
+            throw Failure(message:"Rapid tool changes did not settle on the final selection")
+        }
         let tools:[InkTool] = [.pen,.eraser,.selection,.laser,.ellipse,.rectangle,.freeArrow,.arrow]
         for (index,tool) in tools.enumerated() {
             // Opposite corners are deliberately outside the symbol's painted pixels.
@@ -1489,7 +1503,7 @@ extension AppSelfTest {
                 NSApp.postEvent(up,atStart:true)
                 NSApp.sendEvent(down)
                 try await Task.sleep(for:.milliseconds(30))
-                guard state.tool == tool else { throw Failure(message:"Toolbar padding did not activate \(tool.title), offset=\(offset)") }
+                guard state.tool == tool else { throw Failure(message:"Toolbar padding did not activate \(tool.title), offset=\(offset), state=\(state.tool), native=\(toolControl.selectedSegment)") }
             }
         }
         state.selectTool(.pen)
@@ -1503,7 +1517,7 @@ extension AppSelfTest {
         NSApp.postEvent(toolDragEvent(.leftMouseDragged,100,toolDragTime+0.03),atStart:true)
         NSApp.sendEvent(toolDragEvent(.leftMouseDown,22,toolDragTime))
         try await Task.sleep(for:.milliseconds(150))
-        guard state.tool == .ellipse else { throw Failure(message:"Tool drag did not commit the release tool") }
+        guard state.tool == .ellipse else { throw Failure(message:"Tool drag did not commit the release tool: state=\(state.tool), native=\(toolControl.selectedSegment)") }
 
         window.setContentSize(NSSize(width:440,height:58))
         window.contentView = NSHostingView(rootView:ColorPresetStrip(state:state).frame(width:440,height:58))
@@ -1526,6 +1540,17 @@ extension AppSelfTest {
         guard let colorControl = nativeSegments(window.contentView!), colorControl.segmentCount == 10 else {
             throw Failure(message:"Colors are not a native connected segmented bar")
         }
+        state.color = .black
+        try await Task.sleep(for:.milliseconds(350))
+        state.color = .red
+        try await Task.sleep(for:.milliseconds(70))
+        guard let colorSlide = colorControl.superview?.subviews.first(where: { $0.identifier?.rawValue == "keyboard-selection-slide" }),
+              let colorPresentation = colorSlide.layer?.presentation(), colorPresentation.frame.midX > 22, colorPresentation.frame.midX < 110 else {
+            throw Failure(message:"Programmatic color selection did not slide through an intermediate position")
+        }
+        state.color = .green
+        try await Task.sleep(for:.milliseconds(350))
+        guard colorControl.selectedSegment == 3 else { throw Failure(message:"Rapid color changes did not settle on the final selection") }
         state.color = InkColor(0.23,0.41,0.67)
         try await Task.sleep(for:.milliseconds(50))
         guard colorControl.selectedSegment == -1 else { throw Failure(message:"Custom color incorrectly selected a preset") }
@@ -1551,6 +1576,11 @@ extension AppSelfTest {
                 DrawingToolStrip(state:state)
                 ColorPresetStrip(state:state)
             }.padding(12).background(.bar))
+            let shortcutCanvas = InkCanvasView(state:state)
+            shortcutCanvas.frame = .zero
+            shortcutCanvas.isHidden = true
+            window.contentView!.addSubview(shortcutCanvas)
+            window.makeFirstResponder(shortcutCanvas)
             try await Task.sleep(for:.seconds(90))
         }
 

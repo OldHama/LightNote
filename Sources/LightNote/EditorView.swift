@@ -138,7 +138,7 @@ struct DrawingToolStrip: View {
         NativeToolbarPicker(items:tools.indices.map { index in
             let tool = tools[index]
             return NativeToolbarItem(id:tool.symbol,image:NSImage(systemSymbolName:tool.symbol,accessibilityDescription:tool.title)!,help:help[index])
-        },selected:tools.firstIndex { $0 == state.tool } ?? 0,label:"그리기 도구") { index in
+        },selected:tools.firstIndex { $0 == state.tool } ?? 0,label:"그리기 도구",readSelection:{ tools.firstIndex { $0 == state.tool } ?? 0 }) { index in
             state.selectTool(tools[index])
         }.background(ToolbarBarBackground())
     }
@@ -158,7 +158,7 @@ struct ColorPresetStrip: View {
             image.accessibilityDescription = preset.name + " 펜"
             let key = preset.key + ":" + [preset.color.red,preset.color.green,preset.color.blue,preset.color.alpha].map { String($0) }.joined(separator:",")
             return NativeToolbarItem(id:key,image:image,help:preset.name + " · " + preset.key)
-        },selected:preferences.colorPresets.firstIndex { $0.color == state.color } ?? -1,label:"펜 색상") { index in
+        },selected:preferences.colorPresets.firstIndex { $0.color == state.color } ?? -1,label:"펜 색상",readSelection:{ preferences.colorPresets.firstIndex { $0.color == state.color } ?? -1 }) { index in
             state.color = preferences.colorPresets[index].color
         }.background(ToolbarBarBackground())
     }
@@ -196,10 +196,12 @@ private struct NativeToolbarPicker: NSViewRepresentable {
     let items: [NativeToolbarItem]
     let selected: Int
     let label: String
+    let readSelection: () -> Int
     let onSelect: (Int) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(onSelect:onSelect) }
-    func makeNSView(context:Context) -> ToolbarSegments {
+    func makeNSView(context:Context) -> ToolbarContainer {
         let control = ToolbarSegments()
+        control.frame = NSRect(x:0,y:7,width:CGFloat(items.count)*44,height:44)
         control.trackingMode = .selectOne
         control.segmentStyle = .automatic
         control.segmentDistribution = .fillEqually
@@ -209,17 +211,19 @@ private struct NativeToolbarPicker: NSViewRepresentable {
             control.controlSize = .extraLarge; control.borderShape = .capsule
         } else { control.controlSize = .large }
         if #available(macOS 27.0, *) { control.role = .tabs }
-        return control
+        return ToolbarContainer(control:control)
     }
-    func updateNSView(_ control:ToolbarSegments,context:Context) {
+    func updateNSView(_ container:ToolbarContainer,context:Context) {
+        let control = container.control
+        control.readSelection = readSelection
         context.coordinator.onSelect = onSelect
         control.configure(items)
-        if control.selectedSegment != selected { control.selectedSegment = selected }
+        control.applySelection(selected,animated:!context.environment.accessibilityReduceMotion)
         control.isEnabled = context.environment.isEnabled
         control.setAccessibilityLabel(label)
     }
-    func sizeThatFits(_ proposal:ProposedViewSize,nsView:ToolbarSegments,context:Context) -> CGSize? {
-        NSSize(width:CGFloat(items.count)*44,height:44)
+    func sizeThatFits(_ proposal:ProposedViewSize,nsView:ToolbarContainer,context:Context) -> CGSize? {
+        NSSize(width:CGFloat(items.count)*44,height:58)
     }
     @MainActor final class Coordinator:NSObject {
         var onSelect: (Int) -> Void
@@ -228,6 +232,26 @@ private struct NativeToolbarPicker: NSViewRepresentable {
             guard (0..<sender.segmentCount).contains(sender.selectedSegment) else { return }
             onSelect(sender.selectedSegment)
         }
+    }
+    final class ToolbarContainer:NSView {
+        let control: ToolbarSegments
+        init(control:ToolbarSegments) {
+            self.control = control; super.init(frame:.zero)
+            addSubview(control)
+            needsLayout = true
+        }
+        required init?(coder:NSCoder) { fatalError("init(coder:) unavailable") }
+        override func layout() {
+            super.layout()
+            control.frame = NSRect(x:0,y:(bounds.height-44)/2,width:bounds.width,height:44)
+        }
+    }
+    @available(macOS 26.0, *)
+    final class KeyboardSelectionGlass:NSGlassEffectView {
+        override func hitTest(_ point:NSPoint) -> NSView? { nil }
+    }
+    final class KeyboardSelectionMaterial:NSVisualEffectView {
+        override func hitTest(_ point:NSPoint) -> NSView? { nil }
     }
     final class FullTargetSegmentCell:NSSegmentedCell {
         override func hitTest(for event:NSEvent,in cellFrame:NSRect,of controlView:NSView) -> NSCell.HitResult {
@@ -246,8 +270,94 @@ private struct NativeToolbarPicker: NSViewRepresentable {
 
         private var keys: [String] = []
         private var tips: [TooltipAnchorView] = []
+        var readSelection: (() -> Int)?
+        private var trackingMouse = false
+        private var selectionTarget: Int?
+        private var slidingSelection: NSView?
+        private var selectionGeneration = UUID()
+
+        func applySelection(_ index:Int,animated:Bool) {
+            if trackingMouse { selectionTarget = index; return }
+            if selectionTarget == index, slidingSelection != nil { return }
+            if selectedSegment == index, slidingSelection == nil { selectionTarget = index; return }
+            let previous = selectionTarget ?? selectedSegment
+            let start = slidingSelection.map { $0.layer?.presentation()?.frame ?? $0.frame }
+                ?? selectionFrame(previous).map { convert($0,to:superview) }
+            finishSelectionSlide()
+            selectionTarget = index
+            guard animated, previous >= 0, index >= 0, index < segmentCount,
+                  window?.isVisible == true, let parent = superview, let start else {
+                selectedSegment = index
+                return
+            }
+            selectedSegment = -1
+            let lens: NSView
+            if #available(macOS 26.0, *) {
+                let glass = KeyboardSelectionGlass(frame:start)
+                glass.style = .regular; glass.cornerRadius = start.height/2
+                lens = glass
+            } else {
+                let material = KeyboardSelectionMaterial(frame:start)
+                material.material = .selection; material.blendingMode = .withinWindow; material.state = .active
+                lens = material
+            }
+            lens.identifier = NSUserInterfaceItemIdentifier("keyboard-selection-slide")
+            lens.setAccessibilityHidden(true)
+            lens.wantsLayer = true
+            lens.layer?.cornerRadius = start.height/2
+            slidingSelection = lens
+            parent.addSubview(lens)
+            let token = UUID(); selectionGeneration = token
+            NSAnimationContext.runAnimationGroup { animation in
+                animation.duration = 0.26
+                animation.timingFunction = CAMediaTimingFunction(controlPoints:0.22,0.75,0.25,1)
+                lens.animator().frame = convert(selectionFrame(index)!,to:parent)
+            } completionHandler: { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.selectionGeneration == token else { return }
+                    self.finishSelectionSlide()
+                }
+            }
+        }
+        private func selectionFrame(_ index:Int) -> NSRect? {
+            guard (0..<segmentCount).contains(index) else { return nil }
+            let width = bounds.width/CGFloat(segmentCount)
+            let height = max(14,min(bounds.height,cell?.cellSize.height ?? 24)-4)
+            return NSRect(x:CGFloat(index)*width+2,y:(bounds.height-height)/2,width:width-4,height:height)
+        }
+        private func finishSelectionSlide() {
+            selectionGeneration = UUID()
+            slidingSelection?.layer?.removeAllAnimations()
+            slidingSelection?.removeFromSuperview(); slidingSelection = nil
+            if let selectionTarget { selectedSegment = selectionTarget }
+        }
+        override func mouseDown(with event:NSEvent) {
+            finishSelectionSlide()
+            if let current = readSelection?() {
+                selectionTarget = current; selectedSegment = current
+            }
+            trackingMouse = true
+            defer { trackingMouse = false }
+            super.mouseDown(with:event)
+            if let release = NSApp.currentEvent, release.type == .leftMouseUp,
+               release.windowNumber == event.windowNumber {
+                let point = convert(release.locationInWindow,from:nil)
+                if bounds.contains(point), segmentCount > 0 {
+                    let index = min(segmentCount-1,max(0,Int(point.x/bounds.width*CGFloat(segmentCount))))
+                    if selectedSegment != index || readSelection?() != index {
+                        selectedSegment = index; selectionTarget = index
+                        if let action { sendAction(action,to:target) }
+                    }
+                }
+            }
+        }
+        override func viewWillMove(toWindow newWindow:NSWindow?) {
+            if newWindow == nil { finishSelectionSlide() }
+            super.viewWillMove(toWindow:newWindow)
+        }
         func configure(_ items:[NativeToolbarItem]) {
             guard keys != items.map(\.id) else { return }
+            finishSelectionSlide(); selectionTarget = nil
             keys = items.map(\.id)
             tips.forEach { $0.hideTooltip(); $0.removeFromSuperview() }; tips.removeAll()
             segmentCount = items.count
