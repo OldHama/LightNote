@@ -140,7 +140,7 @@ struct DrawingToolStrip: View {
             return NativeToolbarItem(id:tool.symbol,image:NSImage(systemSymbolName:tool.symbol,accessibilityDescription:tool.title)!,help:help[index])
         },selected:tools.firstIndex { $0 == state.tool } ?? 0,label:"그리기 도구") { index in
             state.selectTool(tools[index])
-        }
+        }.background(ToolbarBarBackground())
     }
 }
 
@@ -160,7 +160,29 @@ struct ColorPresetStrip: View {
             return NativeToolbarItem(id:key,image:image,help:preset.name + " · " + preset.key)
         },selected:preferences.colorPresets.firstIndex { $0.color == state.color } ?? -1,label:"펜 색상") { index in
             state.color = preferences.colorPresets[index].color
-        }
+        }.background(ToolbarBarBackground())
+    }
+}
+
+/// A distinct backplate separates each glass rail from the surrounding toolbar.
+private struct ToolbarBarBackground: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    private var dark: Bool { colorScheme == .dark }
+    var body: some View {
+        Capsule()
+            .fill(LinearGradient(colors:reduceTransparency
+                ? [Color(nsColor:.controlBackgroundColor),Color(nsColor:.controlBackgroundColor)]
+                : (dark ? [Color.white.opacity(0.14),Color.white.opacity(0.06)]
+                        : [Color.white.opacity(0.95),Color.black.opacity(0.04)]),
+                startPoint:.top,endPoint:.bottom))
+            .overlay(Capsule().strokeBorder(LinearGradient(
+                colors:[Color.accentColor.opacity(dark ? 0.3 : 0.2),Color.white.opacity(dark ? 0.12 : 0.7),Color.black.opacity(0.12)],
+                startPoint:.topLeading,endPoint:.bottomTrailing),lineWidth:1))
+            .frame(height:36)
+            .padding(.horizontal,-3)
+            .shadow(color:.black.opacity(dark ? 0.18 : 0.07),radius:4,y:2)
+            .allowsHitTesting(false).accessibilityHidden(true)
     }
 }
 
