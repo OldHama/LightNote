@@ -18,8 +18,7 @@ struct EditorView: View {
                 }.font(.caption).padding(8).background(Color.yellow.opacity(0.15))
             }
             HStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
+                FittingToolbarLayout {
                     Button { NoteLibraryWindowController.shared.present() } label: { Label("보관함",systemImage:"square.grid.2x2") }
                         .topTooltip("노트 보관함").accessibilityLabel("노트 보관함").buttonStyle(ToolbarActionButtonStyle())
                     Button { state.finishInput?(); state.document?.save(nil) } label: { FloppyDiskIcon() }
@@ -27,12 +26,12 @@ struct EditorView: View {
                     Button { state.showShortcuts = true } label: {
                         Image(systemName: "questionmark.circle")
                     }.topTooltip("단축키 도움말 · /").accessibilityLabel("단축키 도움말").buttonStyle(ToolbarActionButtonStyle())
-                    Divider().frame(height: 22)
+                    Divider().frame(width: 1, height: 22)
                     Button { state.document?.undoInk(nil) } label: { Image(systemName: "arrow.uturn.backward") }
                         .disabled(!state.canUndo).topTooltip("실행 취소 · ⌘Z").accessibilityLabel("실행 취소").buttonStyle(ToolbarActionButtonStyle())
                     Button { state.document?.redoInk(nil) } label: { Image(systemName: "arrow.uturn.forward") }
                         .disabled(!state.canRedo).topTooltip("다시 실행 · ⌘⇧Z").accessibilityLabel("다시 실행").buttonStyle(ToolbarActionButtonStyle())
-                    Divider().frame(height: 22)
+                    Divider().frame(width: 1, height: 22)
                     DrawingToolStrip(state: state)
                     Button { state.showStickers = true } label: {
                         Label("스티커",systemImage:"face.smiling").padding(.horizontal,12).frame(height:44).contentShape(Rectangle())
@@ -48,20 +47,19 @@ struct EditorView: View {
                         ForEach(NoteState.penWidths, id: \.self) { width in
                             Text(String(format: "%.1f pt", width)).tag(width)
                         }
-                    }.frame(width: 110).labelsHidden().topTooltip("펜 두께 · [ 얇게 / ] 두껍게")
-                    Divider().frame(height: 22)
+                    }.frame(width: 82).labelsHidden().topTooltip("펜 두께 · [ 얇게 / ] 두껍게")
+                    Divider().frame(width: 1, height: 22)
                     Picker("용지", selection: Binding(
                         get: { state.note.paperStyle },
                         set: { state.document?.setPaperStyle($0) }
                     )) {
                         Text("무지").tag(PaperStyle.blank)
                         Text("모눈").tag(PaperStyle.grid)
-                    }.frame(width: 120).topTooltip("용지 유형 · 무지 / 모눈")
+                    }.frame(width: 90).topTooltip("용지 유형 · 무지 / 모눈")
                 }
                 .buttonStyle(.borderless)
-                .padding(.horizontal, 18).frame(height: 58)
-            }
-            .frame(height: 58)
+                .padding(.horizontal, 12)
+                .frame(maxWidth: .infinity)
             if let version = updateAvailability.version {
                 Button {
                     NSApp.sendAction(#selector(AppDelegate.checkForUpdates(_:)), to: NSApp.delegate, from: nil)
@@ -98,6 +96,40 @@ struct EditorView: View {
         .frame(minWidth: 740, minHeight: 440)
         .sheet(isPresented: $state.showShortcuts) { ShortcutHelpView() }
         .sheet(isPresented: $state.showStickers) { StickerLibraryView(state:state) }
+    }
+}
+
+/// Fit the available width without a horizontal scroll area. Keep native hit targets
+/// intact and place whole controls on a second row when a window is narrow.
+struct FittingToolbarLayout: Layout {
+    private let spacing: CGFloat = 8
+    private func positions(width: CGFloat, subviews: Subviews) -> (points: [CGPoint], height: CGFloat) {
+        var points: [CGPoint] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 58
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width {
+                x = 0; y += rowHeight; rowHeight = 58
+            }
+            points.append(CGPoint(x: x, y: y))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        return (points, y + rowHeight)
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? subviews.reduce(CGFloat(0)) { $0 + $1.sizeThatFits(.unspecified).width + spacing }
+        return CGSize(width: width, height: positions(width: width, subviews: subviews).height)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let layout = positions(width: bounds.width, subviews: subviews)
+        for (view, point) in zip(subviews, layout.points) {
+            let size = view.sizeThatFits(.unspecified)
+            view.place(at: CGPoint(x: bounds.minX + point.x, y: bounds.minY + point.y + (58-size.height)/2),
+                       anchor: .topLeading, proposal: ProposedViewSize(size))
+        }
     }
 }
 

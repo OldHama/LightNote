@@ -1605,6 +1605,11 @@ extension AppSelfTest {
         let stickerUIBitmap = window.contentView!.bitmapImageRepForCachingDisplay(in:window.contentView!.bounds)!
         window.contentView!.cacheDisplay(in:window.contentView!.bounds,to:stickerUIBitmap)
         try stickerUIBitmap.representation(using:.png,properties:[:])!.write(to:URL(fileURLWithPath:"/tmp/lightnote-stickers-preview.png"))
+        // Leave room above the fixture for its child tooltip panel, including
+        // when the display is smaller than the preceding preview window.
+        if let screen = window.screen ?? NSScreen.main {
+            window.setFrameOrigin(NSPoint(x:screen.visibleFrame.minX+20,y:screen.visibleFrame.minY+20))
+        }
         let anchor = TooltipAnchorView(text:"볼펜 · P")
         anchor.frame = NSRect(x:100,y:7,width:44,height:44)
         window.contentView = anchor
@@ -1618,6 +1623,30 @@ extension AppSelfTest {
               window.isKeyWindow else { throw Failure(message:"Tooltip was not above the control or stole focus") }
         anchor.mouseExited(with:NSEvent.enterExitEvent(with:.mouseExited,location:.zero,modifierFlags:[],timestamp:ProcessInfo.processInfo.systemUptime,windowNumber:window.windowNumber,context:nil,eventNumber:0,trackingNumber:0,userData:nil)!)
         guard anchor.tooltipWindow == nil else { throw Failure(message:"Tooltip did not dismiss") }
+        // All native tool and color controls must remain inside the editor at
+        // common window widths; shrinking must never require sideways scrolling.
+        for width: CGFloat in [740, 1000, 1280, 1533, 1920] {
+            window.setContentSize(NSSize(width:width,height:700))
+            window.contentView = NSHostingView(rootView:EditorView(state:state))
+            try await Task.sleep(for:.milliseconds(120))
+            let root = window.contentView!
+            root.layoutSubtreeIfNeeded()
+            func checkBars(_ view:NSView) throws -> Int {
+                var count = 0
+                if let bar = view as? NSSegmentedControl, [8,10].contains(bar.segmentCount) {
+                    let rect = bar.convert(bar.bounds,to:root)
+                    guard rect.minX >= -1, rect.maxX <= root.bounds.width+1,
+                          rect.minY >= -1, rect.maxY <= root.bounds.height+1 else {
+                        throw Failure(message:"Toolbar overflows at width \(width): \(rect)")
+                    }
+                    count += 1
+                }
+                for child in view.subviews { count += try checkBars(child) }
+                return count
+            }
+            guard try checkBars(root) == 2 else { throw Failure(message:"Responsive toolbar lost a control group") }
+        }
+        window.setContentSize(NSSize(width:640,height:480))
         if CommandLine.arguments.contains("--appearance-preview") {
             window.title = "환경설정 모양 검사"
             window.setContentSize(NSSize(width:520,height:560))
