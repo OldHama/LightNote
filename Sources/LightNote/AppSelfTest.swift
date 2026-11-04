@@ -477,6 +477,31 @@ enum AppSelfTest {
         try expect(restoredSettings.colorPresets[0].color == .blue && restoredSettings.gridSpacing == 30 && restoredSettings.gridColor == .green,
                    "Palette and grid preferences did not persist")
         try expect(!restoredSettings.automaticChecks && !restoredSettings.automaticDownloads, "Update settings did not persist")
+        settings.resetColors()
+        let resetSettings = AppPreferences(defaults:preferencesDefaults)
+        try expect(resetSettings.penColor == .black && resetSettings.palette == AppPreferences.originalPresets.map(\.color),
+                   "Color reset did not restore and persist all colors")
+        try expect(resetSettings.penWidth == 3 && resetSettings.gridSpacing == 30,"Color reset changed unrelated settings")
+        try expect(settings.setShortcut(.pen,key:"k") == nil,"Custom shortcut rejected an unused key")
+        try expect(settings.setShortcut(.eraser,key:"k") != nil && settings.shortcutKey(.eraser) == "e",
+                   "Conflicting shortcut was accepted")
+        try expect(AppPreferences(defaults:preferencesDefaults).shortcutKey(.pen) == "k","Custom shortcut did not persist")
+        settings.resetShortcuts()
+        try expect(AppPreferences(defaults:preferencesDefaults).shortcutKey(.pen) == "p","Shortcut reset did not persist")
+        preferencesDefaults.set(["pen":"e"],forKey:AppPreferences.shortcutsKey)
+        try expect(AppPreferences(defaults:preferencesDefaults).shortcutKey(.pen) == "p","Corrupt duplicate shortcuts were loaded")
+        let shortcuts = AppPreferences.shared
+        try expect(shortcuts.setShortcut(.pen,key:"k") == nil,"Could not remap live pen key")
+        canvas.keyDown(with:toolKey("e",code:14))
+        canvas.keyDown(with:toolKey("p",code:35))
+        try expect(doc.state.tool == .eraser,"Old shortcut remained active after remapping")
+        canvas.keyDown(with:toolKey("ㅏ",code:40))
+        try expect(doc.state.tool == .pen,"Remapped physical key did not work with Korean input")
+        try expect(shortcuts.setShortcut(.color1,key:"j") == nil,"Could not remap color key")
+        canvas.keyDown(with:toolKey("2",code:19))
+        canvas.keyDown(with:toolKey("j",code:38))
+        try expect(doc.state.color == shortcuts.palette[0],"Custom color shortcut selected the wrong swatch")
+        shortcuts.resetShortcuts()
         let preferencesKey = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
             timestamp: 950, windowNumber: window.windowNumber, context: nil,
             characters: ",", charactersIgnoringModifiers: ",", isARepeat: false, keyCode: 43)!

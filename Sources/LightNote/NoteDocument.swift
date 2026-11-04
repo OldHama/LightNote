@@ -576,8 +576,8 @@ final class NoteEditorWindow: NSWindow {
            !(firstResponder is NSText), !(firstResponder is NSTextField),
            let canvas = canvas(in: contentView) {
             let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
-            let keys: Set<UInt16> = [0, 3, 8, 9, 12, 14, 15, 18, 19, 20, 21, 22, 23, 25, 26, 28, 29, 30, 33, 35, 37, 44, 51, 53, 117]
-            if event.type == .keyDown, firstResponder !== canvas, modifiers.isEmpty, keys.contains(event.keyCode) {
+
+            if event.type == .keyDown, firstResponder !== canvas, modifiers.isEmpty, (AppPreferences.shared.shortcutAction(for:event) != nil || [51,53,117].contains(event.keyCode)) {
                 makeFirstResponder(canvas)
                 canvas.keyDown(with: event)
                 return

@@ -25,7 +25,7 @@ struct EditorView: View {
                         .topTooltip("저장 · ⌘S").accessibilityLabel("저장").buttonStyle(ToolbarActionButtonStyle())
                     Button { state.showShortcuts = true } label: {
                         Image(systemName: "questionmark.circle")
-                    }.topTooltip("단축키 도움말 · /").accessibilityLabel("단축키 도움말").buttonStyle(ToolbarActionButtonStyle())
+                    }.topTooltip("단축키 도움말 · " + preferences.shortcutLabel(.help)).accessibilityLabel("단축키 도움말").buttonStyle(ToolbarActionButtonStyle())
                     Divider().frame(width: 1, height: 22)
                     Button { state.document?.undoInk(nil) } label: { Image(systemName: "arrow.uturn.backward") }
                         .disabled(!state.canUndo).topTooltip("실행 취소 · ⌘Z").accessibilityLabel("실행 취소").buttonStyle(ToolbarActionButtonStyle())
@@ -47,7 +47,7 @@ struct EditorView: View {
                         ForEach(NoteState.penWidths, id: \.self) { width in
                             Text(String(format: "%.1f pt", width)).tag(width)
                         }
-                    }.frame(width: 82).labelsHidden().topTooltip("펜 두께 · [ 얇게 / ] 두껍게")
+                    }.frame(width: 82).labelsHidden().topTooltip("펜 두께 · " + preferences.shortcutLabel(.thinner) + " 얇게 / " + preferences.shortcutLabel(.thicker) + " 두껍게")
                     Divider().frame(width: 1, height: 22)
                     Picker("용지", selection: Binding(
                         get: { state.note.paperStyle },
@@ -164,12 +164,12 @@ private struct FloppyDiskIcon: View {
 struct DrawingToolStrip: View {
     @ObservedObject var state: NoteState
     private let tools: [InkTool] = [.pen,.eraser,.selection,.laser,.ellipse,.rectangle,.freeArrow,.arrow]
-    private let help = ["볼펜 · P / F","획 지우개 · E","사각형 선택 · V","레이저 · L",
-                        "원 / 타원 · C · ⌘ 정원","사각형 · R · ⌘ 정사각형","자유 화살표 · Q","화살표 · A"]
+    @ObservedObject private var preferences = AppPreferences.shared
+    private let actions: [DrawingShortcut] = [.pen,.eraser,.selection,.laser,.ellipse,.rectangle,.freeArrow,.arrow]
     var body: some View {
         NativeToolbarPicker(items:tools.indices.map { index in
             let tool = tools[index]
-            return NativeToolbarItem(id:tool.symbol,image:NSImage(systemSymbolName:tool.symbol,accessibilityDescription:tool.title)!,help:help[index])
+            return NativeToolbarItem(id:tool.symbol,image:NSImage(systemSymbolName:tool.symbol,accessibilityDescription:tool.title)!,help:actions[index].title + " · " + preferences.shortcutLabel(actions[index]) + (index == 0 ? " / " + preferences.shortcutLabel(.penAlternate) : ""))
         },selected:tools.firstIndex { $0 == state.tool } ?? 0,label:"그리기 도구",readSelection:{ tools.firstIndex { $0 == state.tool } ?? 0 }) { index in
             state.selectTool(tools[index])
         }.background(ToolbarBarBackground())
@@ -388,6 +388,9 @@ private struct NativeToolbarPicker: NSViewRepresentable {
             super.viewWillMove(toWindow:newWindow)
         }
         func configure(_ items:[NativeToolbarItem]) {
+            if tips.count == items.count {
+                for (tip,item) in zip(tips,items) { tip.text = item.help }
+            }
             guard keys != items.map(\.id) else { return }
             finishSelectionSlide(); selectionTarget = nil
             keys = items.map(\.id)
@@ -698,17 +701,17 @@ private struct ShortcutHelpView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("그리기 도구").font(.headline).padding(.bottom, 6)
-                    row("P / F", "펜")
+                    row(preferences.shortcutLabel(.pen) + " / " + preferences.shortcutLabel(.penAlternate), "펜")
                     row("⇧ + 펜 드래그", "시작점부터 커서까지 직선 · 떼면 자유 필기")
-                    row("E", "획 지우개")
-                    row("V", "사각형 선택 · 내부 드래그로 이동")
-                    row("L", "레이저 · 다시 누르면 복원, 떼면 1.3초간 사라짐")
-                    row("C", "원 · 타원")
-                    row("R", "사각형")
-                    row("Q", "펜처럼 그리는 자유 화살표")
-                    row("A", "화살표")
+                    row(preferences.shortcutLabel(.eraser), "획 지우개")
+                    row(preferences.shortcutLabel(.selection), "사각형 선택 · 내부 드래그로 이동")
+                    row(preferences.shortcutLabel(.laser), "레이저 · 다시 누르면 복원, 떼면 1.3초간 사라짐")
+                    row(preferences.shortcutLabel(.ellipse), "원 · 타원")
+                    row(preferences.shortcutLabel(.rectangle), "사각형")
+                    row(preferences.shortcutLabel(.freeArrow), "펜처럼 그리는 자유 화살표")
+                    row(preferences.shortcutLabel(.arrow), "화살표")
                     row("⌘ + 드래그", "원·사각형을 정원·정사각형으로 제한")
-                    row("[ / ]", "펜 두께 감소 / 증가")
+                    row(preferences.shortcutLabel(.thinner) + " / " + preferences.shortcutLabel(.thicker), "펜 두께 감소 / 증가")
                     Divider().padding(.vertical, 12)
                     Text("편집과 문서").font(.headline).padding(.bottom, 6)
                     row("⌘ Z", "실행 취소")
@@ -725,7 +728,7 @@ private struct ShortcutHelpView: View {
                     row("⌘ S", "저장 · 평소에는 자동 저장")
                     row("⌘ ⇧ S", "다른 이름으로 저장")
                     row("⌃ ⌘ F", "전체 화면")
-                    row("/", "단축키 도움말 열기")
+                    row(preferences.shortcutLabel(.help), "단축키 도움말 열기")
                     Divider().padding(.vertical, 12)
                     Text("펜 색상").font(.headline).padding(.bottom, 6)
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 12) {
@@ -738,7 +741,7 @@ private struct ShortcutHelpView: View {
                         }
                     }
                     Divider().padding(.vertical, 12)
-                    Text("두 손가락 스크롤로 이동 · 핀치로 확대/축소\n선택 상자의 모서리를 드래그하면 크기 변경\n도구 단축키는 텍스트 입력 중에는 작동하지 않습니다.")
+                    Text("두 손가락 스크롤로 이동 · 핀치로 확대/축소\n모서리는 비율 유지 · 중앙 핸들은 가로·세로 조절\n도구 단축키는 텍스트 입력 중에는 작동하지 않습니다.")
                         .font(.footnote).foregroundStyle(.secondary).lineSpacing(5)
                 }.padding(24)
             }

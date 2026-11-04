@@ -973,10 +973,6 @@ final class InkCanvasView: NSView {
     override func keyDown(with event: NSEvent) {
         // Handle only canvas input, so text editors retain normal bracket typing.
         if event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty {
-            if event.keyCode == 44 || event.charactersIgnoringModifiers == "/" {
-                state.showShortcuts = true
-                return
-            }
             if state.tool == .selection, event.keyCode == 51 || event.keyCode == 117 {
                 guard !selectedIDs.isEmpty else { return }
                 finishStroke(reason: "selection-delete")
@@ -988,41 +984,19 @@ final class InkCanvasView: NSView {
                 if deletesInk { state.selectTool(.pen) }
                 return
             }
-            if let preset = NoteState.colorPresets.first(where: { $0.key == event.charactersIgnoringModifiers }) {
-                state.color = preset.color
-                return
-            }
-            // Physical bracket keys also work while the Korean input source is active.
-            if event.keyCode == 33 || event.charactersIgnoringModifiers == "[" {
-                state.adjustPenWidth(increase: false)
-                return
-            }
-            if event.keyCode == 30 || event.charactersIgnoringModifiers == "]" {
-                state.adjustPenWidth(increase: true)
-                return
-            }
-            if event.keyCode == 12 || event.charactersIgnoringModifiers?.lowercased() == "q" {
-                state.selectTool(.freeArrow)
-                return
-            }
-            if event.keyCode == 0 || event.charactersIgnoringModifiers?.lowercased() == "a" {
-                state.selectTool(.arrow)
-                return
-            }
-            if event.keyCode == 8 || event.charactersIgnoringModifiers?.lowercased() == "c" {
-                state.selectTool(.ellipse)
-                return
-            }
-            if event.keyCode == 15 || event.charactersIgnoringModifiers?.lowercased() == "r" {
-                state.selectTool(.rectangle)
-                return
-            }
-            if event.keyCode == 37 || event.charactersIgnoringModifiers?.lowercased() == "l" {
-                state.selectTool(.laser)
-                return
-            }
-            if event.keyCode == 9 || event.charactersIgnoringModifiers?.lowercased() == "v" {
-                state.selectTool(.selection)
+            if let action = AppPreferences.shared.shortcutAction(for:event) {
+                if let tool = action.tool { state.selectTool(tool) }
+                else {
+                    switch action {
+                    case .help: state.showShortcuts = true
+                    case .thinner: state.adjustPenWidth(increase:false)
+                    case .thicker: state.adjustPenWidth(increase:true)
+                    default:
+                        if let index = AppPreferences.originalPresets.firstIndex(where:{ "color"+$0.key == action.rawValue }) {
+                            state.color = AppPreferences.shared.palette[index]
+                        }
+                    }
+                }
                 return
             }
             if event.keyCode == 53 {
@@ -1031,14 +1005,7 @@ final class InkCanvasView: NSView {
                 clearSelection()
                 return
             }
-            if event.keyCode == 14 || event.charactersIgnoringModifiers?.lowercased() == "e" {
-                state.selectTool(.eraser)
-                return
-            }
-            if event.keyCode == 35 || event.keyCode == 3 || ["p", "f"].contains(event.charactersIgnoringModifiers?.lowercased() ?? "") {
-                state.selectTool(.pen)
-                return
-            }
+
         }
         super.keyDown(with: event)
     }

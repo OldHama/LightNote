@@ -43,6 +43,25 @@ final class AppPreferences: ObservableObject {
         var gridSpacing: Double = 20
         var palette = AppPreferences.originalPresets.map(\.color)
     }
+    @Published private(set) var shortcutKeys: [String:String] = [:]
+    static let shortcutsKey = "LightNoteDrawingShortcuts"
+    func shortcutKey(_ action:DrawingShortcut) -> String { shortcutKeys[action.rawValue] ?? action.defaultKey }
+    func shortcutLabel(_ action:DrawingShortcut) -> String { shortcutKey(action).uppercased() }
+    func shortcutAction(for event:NSEvent) -> DrawingShortcut? {
+        guard let key = DrawingShortcut.key(for:event) else { return nil }
+        return DrawingShortcut.allCases.first { shortcutKey($0) == key }
+    }
+    @discardableResult func setShortcut(_ action:DrawingShortcut,key:String) -> String? {
+        guard DrawingShortcut.availableKeys.contains(key) else { return "사용할 수 없는 키입니다." }
+        if let other = DrawingShortcut.allCases.first(where:{ $0 != action && shortcutKey($0) == key }) {
+            return key.uppercased() + " 키는 ‘" + other.title + "’에서 사용 중입니다."
+        }
+        shortcutKeys[action.rawValue] = key
+        defaults.set(shortcutKeys,forKey:Self.shortcutsKey)
+        return nil
+    }
+    func resetShortcuts() { shortcutKeys = [:]; defaults.removeObject(forKey:Self.shortcutsKey) }
+    func resetColors() { penColor = .black; palette = Self.originalPresets.map(\.color) }
     private let defaults: UserDefaults
     private var syncingUpdates = false
     @Published var appearanceMode: AppearanceMode {
@@ -64,7 +83,7 @@ final class AppPreferences: ObservableObject {
     var colorPresets: [(key: String, name: String, color: InkColor)] {
         Self.originalPresets.enumerated().map { index, original in
             let color = palette[index]
-            return (original.key, color == original.color ? original.name : "사용자 색상 " + original.key, color)
+            return (shortcutKey(DrawingShortcut(rawValue:"color"+original.key)!), color == original.color ? original.name : "사용자 색상 " + original.key, color)
         }
     }
     init(defaults: UserDefaults) {
@@ -76,6 +95,12 @@ final class AppPreferences: ObservableObject {
         penColor = stored.penColor; penWidth = stored.penWidth; defaultPaper = stored.paper
         paperColor = stored.paperColor; gridColor = stored.gridColor; gridSpacing = stored.gridSpacing
         palette = stored.palette
+        if let saved = defaults.dictionary(forKey:Self.shortcutsKey) as? [String:String] {
+            let resolved = DrawingShortcut.allCases.map { saved[$0.rawValue] ?? $0.defaultKey }
+            if resolved.allSatisfy({ DrawingShortcut.availableKeys.contains($0) }), Set(resolved).count == resolved.count {
+                shortcutKeys = saved.filter { DrawingShortcut(rawValue:$0.key) != nil }
+            }
+        }
         automaticChecks = defaults.object(forKey: "SUEnableAutomaticChecks") as? Bool ?? true
         automaticDownloads = defaults.object(forKey: "SUAutomaticallyUpdate") as? Bool ?? true
     }
@@ -138,13 +163,16 @@ struct PreferencesView: View {
                     }
                     Text("열린 노트와 새 노트에서 새로 그리는 획에 적용됩니다.").font(.caption).foregroundStyle(.secondary)
                 }
-                Section("숫자 단축키 색상") {
+                Section("단축키 색상") {
                     ForEach(Array(AppPreferences.originalPresets.enumerated()), id: \.element.key) { index, preset in
-                        ColorPicker("키 " + preset.key,
+                        ColorPicker("키 " + preferences.shortcutLabel(DrawingShortcut(rawValue:"color"+preset.key)!),
                             selection: color({ preferences.palette[index] }, { preferences.palette[index] = $0 }), supportsOpacity: false)
                     }
                 }
+                Button("색상을 기본값으로 초기화") { preferences.resetColors() }
             }.formStyle(.grouped).tabItem { Label("펜과 색상", systemImage: "pencil.tip") }
+            ShortcutPreferencesView(preferences:preferences)
+                .tabItem { Label("단축키",systemImage:"keyboard") }
             Form {
                 Section("새 노트") {
                     Picker("기본 용지", selection: $preferences.defaultPaper) {
