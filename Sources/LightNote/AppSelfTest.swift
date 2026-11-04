@@ -372,6 +372,33 @@ enum AppSelfTest {
         doc.redoInk(nil)
         try expect(doc.state.note.strokes.first { $0.id == rectangle.id } == enlarged, "Resize redo failed")
         doc.undoInk(nil)
+        // An uneven corner drag must still preserve the original 2:1 shape.
+        begin()
+        canvas.mouseDown(with:event(.leftMouseDown,frame.maxX,frame.maxY,810.1))
+        canvas.mouseUp(with:event(.leftMouseUp,frame.maxX+frame.width,frame.maxY+frame.height/4,810.2))
+        end()
+        let proportional = doc.state.note.strokes.first { $0.id == rectangle.id }!
+        try expect(abs(proportional.pointBounds.width/proportional.pointBounds.height-2) < 1e-9,
+                   "Uneven corner drag changed aspect ratio")
+        doc.undoInk(nil)
+        for (handle, target, horizontal) in [
+            (CGPoint(x:frame.minX,y:frame.midY),CGPoint(x:frame.minX-30,y:frame.midY+40),true),
+            (CGPoint(x:frame.maxX,y:frame.midY),CGPoint(x:frame.maxX+30,y:frame.midY-40),true),
+            (CGPoint(x:frame.midX,y:frame.minY),CGPoint(x:frame.midX+40,y:frame.minY-30),false),
+            (CGPoint(x:frame.midX,y:frame.maxY),CGPoint(x:frame.midX-40,y:frame.maxY+30),false)
+        ] {
+            begin()
+            canvas.mouseDown(with:event(.leftMouseDown,handle.x,handle.y,810.3))
+            canvas.mouseUp(with:event(.leftMouseUp,target.x,target.y,810.4))
+            end()
+            let changed = doc.state.note.strokes.first { $0.id == rectangle.id }!
+            try expect(horizontal
+                ? abs(changed.pointBounds.height-50) < 1e-9 && changed.pointBounds.width > 100
+                : abs(changed.pointBounds.width-100) < 1e-9 && changed.pointBounds.height > 50,
+                "Side handle did not resize only its own axis")
+            doc.undoInk(nil)
+            try expect(doc.state.note.strokes == beforeResize,"Side resize undo was not exact")
+        }
         begin()
         canvas.mouseDown(with: event(.leftMouseDown, frame.minX, frame.minY, 811))
         canvas.mouseUp(with: event(.leftMouseUp, frame.midX, frame.midY, 812))

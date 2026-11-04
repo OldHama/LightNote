@@ -128,8 +128,8 @@ final class InkCanvasView: NSView {
         let corner: CGPoint
         var target: CGPoint
         var transform: CGAffineTransform {
-            let sx = abs(target.x-anchor.x)/source.width
-            let sy = abs(target.y-anchor.y)/source.height
+            let sx = corner.x == source.midX ? 1 : abs(target.x-anchor.x)/source.width
+            let sy = corner.y == source.midY ? 1 : abs(target.y-anchor.y)/source.height
             return CGAffineTransform(a: sx, b: 0, c: 0, d: sy,
                                      tx: anchor.x*(1-sx), ty: anchor.y*(1-sy))
         }
@@ -421,12 +421,11 @@ final class InkCanvasView: NSView {
         }
         if state.tool == .selection {
             let point = convert(event.locationInWindow, from: nil)
-            if !selectionContainsLocked, let rect = selectionBounds, let corner = handleCorners(rect).first(where: {
+            if !selectionContainsLocked, let rect = selectionBounds, let corner = resizeHandles(rect).sorted { hypot($0.x-point.x,$0.y-point.y) < hypot($1.x-point.x,$1.y-point.y) }.first(where: {
                 abs($0.x-point.x) <= handleRadius && abs($0.y-point.y) <= handleRadius &&
                 hypot($0.x-point.x, $0.y-point.y) < hypot(rect.midX-point.x, rect.midY-point.y)
             }) {
-                let anchor = CGPoint(x: corner.x == rect.minX ? rect.maxX : rect.minX,
-                                     y: corner.y == rect.minY ? rect.maxY : rect.minY)
+                let anchor = CGPoint(x: 2*rect.midX-corner.x, y: 2*rect.midY-corner.y)
                 resizeDrag = ResizeDrag(source: rect, anchor: anchor, corner: corner, target: corner)
             } else if let rect = selectionBounds, rect.contains(point) {
                 guard !selectionContainsLocked else { return }
@@ -686,6 +685,10 @@ final class InkCanvasView: NSView {
         [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
          CGPoint(x: rect.maxX, y: rect.maxY), CGPoint(x: rect.minX, y: rect.maxY)]
     }
+    private func resizeHandles(_ rect: CGRect) -> [CGPoint] {
+        handleCorners(rect) + [CGPoint(x:rect.midX,y:rect.minY), CGPoint(x:rect.maxX,y:rect.midY),
+                               CGPoint(x:rect.midX,y:rect.maxY), CGPoint(x:rect.minX,y:rect.midY)]
+    }
     private var selectionTransform: CGAffineTransform {
         resizeDrag?.transform ?? CGAffineTransform(translationX: moveDelta.width, y: moveDelta.height)
     }
@@ -814,6 +817,20 @@ final class InkCanvasView: NSView {
             resize.target = CGPoint(
                 x: resize.corner.x < resize.anchor.x ? min(point.x, resize.anchor.x-minimum) : max(point.x, resize.anchor.x+minimum),
                 y: resize.corner.y < resize.anchor.y ? min(point.y, resize.anchor.y-minimum) : max(point.y, resize.anchor.y+minimum))
+            let changesX = resize.corner.x != resize.source.midX
+            let changesY = resize.corner.y != resize.source.midY
+            if changesX && changesY {
+                // Corners scale uniformly about the opposite corner. Clamp the
+                // scale, rather than each dimension, to preserve thin objects.
+                let scale = max(minimum/min(resize.source.width,resize.source.height),
+                                max(abs(resize.target.x-resize.anchor.x)/resize.source.width,
+                                    abs(resize.target.y-resize.anchor.y)/resize.source.height))
+                resize.target = CGPoint(x:resize.anchor.x + (resize.corner.x-resize.anchor.x)*scale,
+                                        y:resize.anchor.y + (resize.corner.y-resize.anchor.y)*scale)
+            } else {
+                if !changesX { resize.target.x = resize.corner.x }
+                if !changesY { resize.target.y = resize.corner.y }
+            }
             resizeDrag = resize
             let updated = resize.source.applying(resize.transform)
             expandWorkspace(to: NSSize(width: updated.maxX+24, height: updated.maxY+24))
@@ -1100,7 +1117,7 @@ final class InkCanvasView: NSView {
             if marqueeRect == nil && !selectionContainsLocked {
                 context.setLineDash(phase: 0, lengths: [])
                 context.setFillColor(NSColor.white.cgColor)
-                for corner in handleCorners(rect) {
+                for corner in resizeHandles(rect) {
                     let box = CGRect(x: corner.x-4/scale, y: corner.y-4/scale, width: 8/scale, height: 8/scale)
                     context.fill(box)
                     context.stroke(box)
