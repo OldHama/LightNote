@@ -128,8 +128,6 @@ struct PreferencesView: View {
                             Text(mode.title).tag(mode)
                         }
                     }.pickerStyle(.radioGroup)
-                    Text("선택 즉시 적용되며 다음 실행에도 유지됩니다.")
-                        .font(.caption).foregroundStyle(.secondary)
                 }
             }.formStyle(.grouped).tabItem { Label("모양",systemImage:"circle.lefthalf.filled") }
             Form {
