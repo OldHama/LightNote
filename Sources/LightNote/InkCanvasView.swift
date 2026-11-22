@@ -772,23 +772,41 @@ final class InkCanvasView: NSView {
     private func drawLaser(_ path: CGPath, tail: CGPoint?, color: InkColor, opacity: Double, context: CGContext) {
         guard opacity > 0 else { return }
         let scale = enclosingScrollView?.magnification ?? 1
+        let ink = color.cgColor
+        let core = CGColor(srgbRed: color.red * 0.25 + 0.75,
+                           green: color.green * 0.25 + 0.75,
+                           blue: color.blue * 0.25 + 0.75,
+                           alpha: color.alpha)
+        let point = path.currentPoint
+        let isDot = path.boundingBoxOfPath.size == .zero && (tail == nil || tail == point)
+
+        func paint(width: CGFloat, color: CGColor) {
+            if isDot {
+                let radius = width / (2 * scale)
+                context.setFillColor(color)
+                context.fillEllipse(in: CGRect(x: point.x - radius, y: point.y - radius,
+                                               width: radius * 2, height: radius * 2))
+            } else {
+                context.setStrokeColor(color)
+                context.setLineWidth(width / scale)
+                context.addPath(path)
+                if let tail { context.addLine(to: tail) }
+                context.strokePath()
+            }
+        }
+
         context.saveGState()
         context.setAlpha(opacity)
-        context.setStrokeColor(color.cgColor)
-        context.setFillColor(color.cgColor)
-        context.setLineWidth(2.5 / scale)
+        // Fade the glow, outline and core together as a single trace.
+        context.beginTransparencyLayer(auxiliaryInfo: nil)
         context.setLineCap(.round)
         context.setLineJoin(.round)
-        context.setShadow(offset: .zero, blur: 6 / scale,
-                          color: color.cgColor.copy(alpha: color.alpha * 0.8))
-        if path.boundingBoxOfPath.size == .zero && (tail == nil || tail == path.currentPoint) {
-            let point = path.currentPoint, radius = 2 / scale
-            context.fillEllipse(in: CGRect(x: point.x-radius, y: point.y-radius, width: radius*2, height: radius*2))
-        } else {
-            context.addPath(path)
-            if let tail { context.addLine(to: tail) }
-            context.strokePath()
-        }
+        context.saveGState()
+        context.setShadow(offset: .zero, blur: 4 / scale, color: ink.copy(alpha: color.alpha * 0.45))
+        paint(width: isDot ? 5 : 3.5, color: ink)
+        context.restoreGState()
+        paint(width: isDot ? 2.2 : 1.2, color: core)
+        context.endTransparencyLayer()
         context.restoreGState()
     }
 
