@@ -96,10 +96,12 @@ final class InkCanvasView: NSView {
     private struct LaserTrace {
         let path: CGPath
         let bounds: CGRect
+        let color: InkColor
         var releasedAt: TimeInterval?
         var opacity: Double = 1
     }
     private var activeLaser: InkPathBuilder?
+    private var activeLaserColor: InkColor = .black
     private var activeLaserBounds = CGRect.null
     private var laserTraces: [LaserTrace] = []
     private var laserTimer: Timer?
@@ -413,6 +415,7 @@ final class InkCanvasView: NSView {
                 laserTraces[index].releasedAt = nil
                 setNeedsDisplay(laserTraces[index].bounds.insetBy(dx: -laserPadding, dy: -laserPadding))
             }
+            activeLaserColor = state.color
             activeLaser = InkPathBuilder()
             activeLaserBounds = .null
             appendLaser(event)
@@ -738,7 +741,7 @@ final class InkCanvasView: NSView {
             laserTraces[index].releasedAt = releasedAt
         }
         laserTraces.append(LaserTrace(path: activeLaser.path.copy()!, bounds: activeLaserBounds,
-                                      releasedAt: releasedAt))
+                                      color: activeLaserColor, releasedAt: releasedAt))
         self.activeLaser = nil
         setNeedsDisplay(activeLaserBounds.insetBy(dx: -laserPadding, dy: -laserPadding))
         startLaserTimer()
@@ -766,18 +769,18 @@ final class InkCanvasView: NSView {
         laserTraces.removeAll { $0.opacity * LaserTiming.opacity(releasedAt: $0.releasedAt, now: now) <= 0 }
         if laserTraces.isEmpty && activeLaser == nil { laserTimer?.invalidate(); laserTimer = nil }
     }
-    private func drawLaser(_ path: CGPath, tail: CGPoint?, opacity: Double, context: CGContext) {
+    private func drawLaser(_ path: CGPath, tail: CGPoint?, color: InkColor, opacity: Double, context: CGContext) {
         guard opacity > 0 else { return }
         let scale = enclosingScrollView?.magnification ?? 1
         context.saveGState()
         context.setAlpha(opacity)
-        context.setStrokeColor(CGColor(srgbRed: 1, green: 0.06, blue: 0.13, alpha: 1))
-        context.setFillColor(CGColor(srgbRed: 1, green: 0.06, blue: 0.13, alpha: 1))
+        context.setStrokeColor(color.cgColor)
+        context.setFillColor(color.cgColor)
         context.setLineWidth(2.5 / scale)
         context.setLineCap(.round)
         context.setLineJoin(.round)
         context.setShadow(offset: .zero, blur: 6 / scale,
-                          color: CGColor(srgbRed: 1, green: 0, blue: 0.1, alpha: 0.8))
+                          color: color.cgColor.copy(alpha: color.alpha * 0.8))
         if path.boundingBoxOfPath.size == .zero && (tail == nil || tail == path.currentPoint) {
             let point = path.currentPoint, radius = 2 / scale
             context.fillEllipse(in: CGRect(x: point.x-radius, y: point.y-radius, width: radius*2, height: radius*2))
@@ -1094,9 +1097,9 @@ final class InkCanvasView: NSView {
         }
         let now = ProcessInfo.processInfo.systemUptime
         for trace in laserTraces {
-            drawLaser(trace.path, tail: nil, opacity: trace.opacity * LaserTiming.opacity(releasedAt: trace.releasedAt, now: now), context: context)
+            drawLaser(trace.path, tail: nil, color: trace.color, opacity: trace.opacity * LaserTiming.opacity(releasedAt: trace.releasedAt, now: now), context: context)
         }
-        if let activeLaser { drawLaser(activeLaser.path, tail: activeLaser.lastPoint, opacity: 1, context: context) }
+        if let activeLaser { drawLaser(activeLaser.path, tail: activeLaser.lastPoint, color: activeLaserColor, opacity: 1, context: context) }
     }
     /// Page guides do not alter ink coordinates and are excluded from PNG exports.
     private func drawPageBoundaries(in dirtyRect: CGRect, context: CGContext) {
