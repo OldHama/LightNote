@@ -309,7 +309,7 @@ final class InkCanvasView: NSView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
     @objc private func appResigned() {
-        focusRequest = UUID()
+        focusRequest = nil
         finishStroke(reason: "app-inactive")
     }
 
@@ -323,7 +323,7 @@ final class InkCanvasView: NSView {
         }
     }
     @objc private func windowResigned() {
-        focusRequest = UUID()
+        focusRequest = nil
         finishStroke(reason: "window-inactive")
         updateCommandSelection(false)
     }
@@ -355,45 +355,55 @@ final class InkCanvasView: NSView {
         needsDisplay = true
     }
 
-    private var focusRequest = UUID()
+    private var focusRequest: UUID?
+
     private func focusForDrawing() {
         guard let window, window.attachedSheet == nil, NSApp.modalWindow == nil else { return }
-        if NSApp.isActive, window.isKeyWindow, window.firstResponder === self { return }
+        if NSApp.isActive, window.isKeyWindow, window.firstResponder === self {
+            focusRequest = nil
+            return
+        }
+        // A stream of drag or tablet events must not replace the pending retries.
+        guard focusRequest == nil else { return }
         let request = UUID()
         focusRequest = request
         let sourcePID = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        func acquire() {
-            if !NSApp.isActive {
-                // App activation and key-window assignment are separate asynchronous operations.
-                NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
-                NSApp.activate()
-            }
-            window.makeKeyAndOrderFront(nil)
-            window.makeMain()
-            window.makeFirstResponder(self)
-        }
-        acquire()
-        // A tablet/Sidecar first-mouse event may be delivered before activation finishes.
-        // Reapply the responder after that event, but never follow a switch to a third app.
-        for delay in [0.0, 0.08, 0.25] {
+        acquireDrawingFocus(in: window)
+
+        let delays = [0.0, 0.05, 0.12, 0.25, 0.5, 0.8]
+        for (index, delay) in delays.enumerated() {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak window] in
-                guard let self, let window, self.window === window,
-                      self.focusRequest == request, window.isVisible,
+                guard let self, self.focusRequest == request else { return }
+                guard let window, self.window === window, window.isVisible,
                       window.attachedSheet == nil, NSApp.modalWindow == nil,
-                      !(window.firstResponder is NSText), !(window.firstResponder is NSTextField) else { return }
-                let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
-                guard front == sourcePID || front == ProcessInfo.processInfo.processIdentifier else { return }
-                guard NSApp.keyWindow == nil || NSApp.keyWindow === window || !NSApp.isActive else { return }
-                if !NSApp.isActive {
-                    NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
-                    NSApp.activate()
+                      !(window.firstResponder is NSText), !(window.firstResponder is NSTextField) else {
+                    self.focusRequest = nil
+                    return
                 }
-                window.makeKeyAndOrderFront(nil)
-                window.makeMain()
-                window.makeFirstResponder(self)
+                let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+                guard (front == sourcePID || front == ProcessInfo.processInfo.processIdentifier),
+                      NSApp.keyWindow == nil || NSApp.keyWindow === window || !NSApp.isActive else {
+                    self.focusRequest = nil
+                    return
+                }
+                if !NSApp.isActive || !window.isKeyWindow || window.firstResponder !== self {
+                    self.acquireDrawingFocus(in: window)
+                }
+                if (NSApp.isActive && window.isKeyWindow && window.firstResponder === self)
+                    || index == delays.count - 1 {
+                    self.focusRequest = nil
+                }
             }
         }
     }
+
+    private func acquireDrawingFocus(in window: NSWindow) {
+        if !NSApp.isActive { NSApp.activate() }
+        window.makeKeyAndOrderFront(nil)
+        window.makeMain()
+        window.makeFirstResponder(self)
+    }
+
     override func mouseDown(with event: NSEvent) {
         guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
         focusForDrawing()
@@ -454,7 +464,7 @@ final class InkCanvasView: NSView {
         append(event)
     }
     override func mouseDragged(with event: NSEvent) {
-        focusForDrawing()
+        if inputInProgress { focusForDrawing() }
         if shapeDraft != nil { updateShape(with: event); return }
         if activeLaser != nil { appendLaser(event); return }
         if marqueeStart != nil || moveStart != nil || resizeDrag != nil { updateSelection(with: event); return }
@@ -463,6 +473,7 @@ final class InkCanvasView: NSView {
         append(event)
     }
     override func mouseUp(with event: NSEvent) {
+        if inputInProgress { focusForDrawing() }
         defer { updateCommandSelection(event.modifierFlags.contains(.command), completed: true) }
         if shapeDraft != nil {
             updateShape(with: event)
@@ -493,7 +504,9 @@ final class InkCanvasView: NSView {
     }
     override func tabletPoint(with event: NSEvent) {
         // AppKit may deliver independent tablet-point events between mouse events.
-        if event.pressure > 0 { focusForDrawing() }
+        if event.pressure > 0, inputInProgress || visibleRect.contains(convert(event.locationInWindow, from: nil)) {
+            focusForDrawing()
+        }
         if shapeDraft != nil { updateShape(with: event); return }
         if activeLaser != nil { appendLaser(event); return }
         if marqueeStart != nil || moveStart != nil || resizeDrag != nil { updateSelection(with: event); return }
