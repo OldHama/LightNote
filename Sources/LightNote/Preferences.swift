@@ -204,7 +204,12 @@ struct PreferencesView: View {
     }
 }
 
-// Registered stickers are independent of notes; inserted copies embed their PNG.
+struct ObjectSticker: Codable {
+    let objects: Data
+    let thumbnail: Data?
+}
+
+// Registered stickers are independent of notes.
 @MainActor
 final class StickerLibrary: ObservableObject {
     struct Sticker: Identifiable {
@@ -221,16 +226,25 @@ final class StickerLibrary: ObservableObject {
         do {
             guard FileManager.default.fileExists(atPath: directory.path) else { stickers = []; loadError = nil; return }
             let urls = try FileManager.default.contentsOfDirectory(at:directory,includingPropertiesForKeys:[.creationDateKey],options:.skipsHiddenFiles)
-                .filter { $0.pathExtension.lowercased() == "png" }
+                .filter { ["png", "lightsticker"].contains($0.pathExtension.lowercased()) }
                 .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
             stickers = urls.compactMap { url in
-                guard let source = CGImageSourceCreateWithURL(url as CFURL,nil),
-                      let thumb = CGImageSourceCreateThumbnailAtIndex(source,0,[
-                        kCGImageSourceCreateThumbnailFromImageAlways:true,
-                        kCGImageSourceCreateThumbnailWithTransform:true,
-                        kCGImageSourceThumbnailMaxPixelSize:200] as CFDictionary) else { return nil }
+                let thumbnail: NSImage
+                if url.pathExtension.lowercased() == "lightsticker" {
+                    guard let data = try? Data(contentsOf:url),
+                          let sticker = try? PropertyListDecoder().decode(ObjectSticker.self,from:data) else { return nil }
+                    thumbnail = sticker.thumbnail.flatMap { NSImage(data:$0) }
+                        ?? NSImage(systemSymbolName:"square.on.square",accessibilityDescription:"객체 스티커")!
+                } else {
+                    guard let source = CGImageSourceCreateWithURL(url as CFURL,nil),
+                          let thumb = CGImageSourceCreateThumbnailAtIndex(source,0,[
+                            kCGImageSourceCreateThumbnailFromImageAlways:true,
+                            kCGImageSourceCreateThumbnailWithTransform:true,
+                            kCGImageSourceThumbnailMaxPixelSize:200] as CFDictionary) else { return nil }
+                    thumbnail = NSImage(cgImage:thumb,size:.zero)
+                }
                 let name = url.deletingPathExtension().lastPathComponent.components(separatedBy:"__").dropLast().joined(separator:"__")
-                return Sticker(id:url.lastPathComponent,name:name.isEmpty ? "스티커" : name,thumbnail:NSImage(cgImage:thumb,size:.zero))
+                return Sticker(id:url.lastPathComponent,name:name.isEmpty ? "스티커" : name,thumbnail:thumbnail)
             }
             loadError = nil
         } catch { loadError = error.localizedDescription }
@@ -273,6 +287,15 @@ final class StickerLibrary: ObservableObject {
             throw NSError(domain:"LightNote.Stickers",code:4,userInfo:[NSLocalizedDescriptionKey:"등록한 스티커를 표시하지 못했습니다."])
         }
         return item
+    }
+    func addObjects(_ sticker: ObjectSticker) throws {
+        let encoder = PropertyListEncoder()
+        encoder.outputFormat = .binary
+        let data = try encoder.encode(sticker)
+        try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
+        let id = "선택 영역__" + UUID().uuidString + ".lightsticker"
+        try RecoveryJournal.durableWrite(data,to:directory.appendingPathComponent(id))
+        reload()
     }
     func importImage(at url: URL) throws {
         let size = try url.resourceValues(forKeys:[.fileSizeKey]).fileSize ?? 0

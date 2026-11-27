@@ -212,7 +212,7 @@ final class InkCanvasView: NSView {
         self.state = state
         super.init(frame: CGRect(x: 0, y: 0, width: state.note.pageWidth, height: state.note.pageHeight))
         expandWorkspaceToStoredInk()
-        state.stickerSelectionPNG = { [weak self] in try self?.selectionPNG() }
+        state.stickerSelection = { [weak self] in try self?.selectionSticker() }
         state.insertSticker = { [weak self] data in self?.insertSticker(data) ?? false }
         state.copySelectionPNG = { [weak self] in self?.performPNGAction(export: false) }
         state.exportSelectionPNG = { [weak self] in self?.performPNGAction(export: true) }
@@ -544,10 +544,18 @@ final class InkCanvasView: NSView {
     @objc private func contextSavePNG(_ sender: Any?) { performPNGAction(export:true) }
     @objc private func contextCreateSticker(_ sender: Any?) {
         do {
-            guard let data = try selectionPNG() else { return }
-            try StickerLibrary.shared.add(data:data,name:"선택 영역")
+            guard let sticker = try selectionSticker() else { return }
+            try StickerLibrary.shared.addObjects(sticker)
             state.showStickers = true
         } catch { NSApp.presentError(error) }
+    }
+
+    func selectionSticker() throws -> ObjectSticker? {
+        finishStroke(reason:"selection-sticker")
+        let strokes = state.note.strokes.filter { selectedIDs.contains($0.id) }
+        guard !strokes.isEmpty else { return nil }
+        let objects = try NoteFile(strokes:strokes).encoded()
+        return ObjectSticker(objects:objects,thumbnail:try? renderSelectionPNG(strokes,thumbnail:true))
     }
 
     /// Render selected objects only, in document order, without handles or laser.
@@ -556,8 +564,12 @@ final class InkCanvasView: NSView {
         finishStroke(reason: "selection-png")
         let strokes = state.note.strokes.filter { selectedIDs.contains($0.id) }
         guard !strokes.isEmpty else { return nil }
+        return try renderSelectionPNG(strokes,thumbnail:false)
+    }
+
+    private func renderSelectionPNG(_ strokes: [InkStroke], thumbnail: Bool) throws -> Data {
         let box = strokes.reduce(CGRect.null) { $0.union($1.bounds) }.insetBy(dx: -8, dy: -8).integral
-        let scale: CGFloat = 2
+        let scale: CGFloat = thumbnail ? min(2,200/max(box.width,box.height)) : 2
         let width = ceil(box.width * scale), height = ceil(box.height * scale)
         guard width.isFinite, height.isFinite, width > 0, height > 0,
               width <= 16384, height <= 16384, width * height <= 32_000_000,
@@ -573,9 +585,11 @@ final class InkCanvasView: NSView {
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(cgContext:context,flipped:true)
         defer { NSGraphicsContext.restoreGraphicsState() }
-        context.setFillColor(state.note.paperStyle == .grid ? AppPreferences.shared.paperColor.cgColor : NSColor.white.cgColor)
-        context.fill(box)
-        if state.note.paperStyle == .grid { drawGrid(in:box,context:context) }
+        if !thumbnail {
+            context.setFillColor(state.note.paperStyle == .grid ? AppPreferences.shared.paperColor.cgColor : NSColor.white.cgColor)
+            context.fill(box)
+            if state.note.paperStyle == .grid { drawGrid(in:box,context:context) }
+        }
         context.setAllowsAntialiasing(true); context.setShouldAntialias(true)
         for stroke in strokes {
             if stroke.tool == "image", let data = stroke.imagePNG, let image = NSImage(data:data), stroke.samples.count == 2 {
@@ -586,7 +600,7 @@ final class InkCanvasView: NSView {
                 render(stroke,path:InkPathBuilder.make(stroke:stroke).path,in:context)
             }
         }
-        bitmap.size = box.size
+        if !thumbnail { bitmap.size = box.size }
         guard let data = bitmap.representation(using:.png,properties:[:]) else {
             throw NSError(domain:"LightNote.PNG",code:2,userInfo:[NSLocalizedDescriptionKey:"PNG 이미지를 만들지 못했습니다."])
         }
@@ -654,6 +668,10 @@ final class InkCanvasView: NSView {
     }
     @discardableResult
     func insertSticker(_ data: Data) -> Bool {
+        if let sticker = try? PropertyListDecoder().decode(ObjectSticker.self,from:data),
+           let note = try? NoteFile.decode(sticker.objects) {
+            return insertCopies(note.strokes,offsetIndex:0,actionName:"스티커 삽입",centerInViewport:true)
+        }
         guard data.count <= 50_000_000, let bitmap = NSBitmapImageRep(data:data),
               bitmap.size.width > 0, bitmap.size.height > 0 else { return false }
         let viewport = visibleRect.isEmpty ? bounds : visibleRect
@@ -672,14 +690,17 @@ final class InkCanvasView: NSView {
         return insertCopies(state.note.strokes.filter { selectedIDs.contains($0.id) },
                             offsetIndex: 1, actionName: "복제")
     }
-    private func insertCopies(_ originals: [InkStroke], offsetIndex: Int, actionName: String) -> Bool {
+    private func insertCopies(_ originals: [InkStroke], offsetIndex: Int, actionName: String, centerInViewport: Bool = false) -> Bool {
         guard !originals.isEmpty, let document = state.document else { return false }
         finishStroke(reason: "paste")
         let box = originals.reduce(CGRect.null) { $0.union($1.bounds) }
         let offset = CGFloat(offsetIndex) * 20 / (enclosingScrollView?.magnification ?? 1)
         let viewport = visibleRect.isEmpty ? bounds : visibleRect
         var delta = CGSize(width: offset, height: offset)
-        if !viewport.contains(CGPoint(x: box.minX+offset, y: box.minY+offset)) {
+        if centerInViewport {
+            delta = CGSize(width:max(viewport.minX,viewport.midX-box.width/2)-box.minX,
+                           height:max(viewport.minY,viewport.midY-box.height/2)-box.minY)
+        } else if !viewport.contains(CGPoint(x: box.minX+offset, y: box.minY+offset)) {
             delta = CGSize(width: viewport.minX+offset-box.minX, height: viewport.minY+offset-box.minY)
         }
         let copies = originals.map { $0.copied(offset: delta) }

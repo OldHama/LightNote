@@ -621,8 +621,8 @@ struct StickerLibraryView: View {
                 }
                 Button("선택 영역 등록") {
                     attempt {
-                        guard let data = try state.stickerSelectionPNG?() else { return }
-                        try library.add(data:data,name:"선택 영역")
+                        guard let sticker = try state.stickerSelection?() else { return }
+                        try library.addObjects(sticker)
                     }
                 }.disabled(!state.hasSelection)
                 Spacer()

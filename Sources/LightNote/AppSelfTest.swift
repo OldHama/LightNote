@@ -646,9 +646,21 @@ enum AppSelfTest {
         createMenu.performActionForItem(at:0)
         let createdContextStickers = StickerLibrary.shared.stickers.filter{!beforeContextStickers.contains($0.id)}
         try expect(createdContextStickers.count == 1 && destinationDoc.state.showStickers,"Context sticker creation failed")
-        let createdContextPNG = try StickerLibrary.shared.data(for:createdContextStickers[0])
-        try expect(createdContextPNG == exportedPNG && destinationDoc.state.note == beforePNG,"Context sticker changed note or rendered different content")
+        let stickerDataFromDisk = try StickerLibrary.shared.data(for:createdContextStickers[0])
+        let objectSticker = try PropertyListDecoder().decode(ObjectSticker.self,from:stickerDataFromDisk)
+        let storedObjects = try NoteFile.decode(objectSticker.objects).strokes
+        try expect(storedObjects.count == 2 && storedObjects.contains { $0.imagePNG != nil }
+                   && storedObjects.contains { $0.imagePNG == nil } && destinationDoc.state.note == beforePNG,
+                   "Mixed selection was not saved as original objects")
+        let objectStickerDoc = NoteDocument()
+        let objectStickerCanvas = InkCanvasView(state:objectStickerDoc.state)
         try StickerLibrary.shared.remove(createdContextStickers[0])
+        try expect(objectStickerCanvas.insertSticker(stickerDataFromDisk),"Object sticker could not be inserted")
+        let insertedObjects = objectStickerDoc.state.note.strokes
+        try expect(insertedObjects.map(\.tool) == storedObjects.map(\.tool)
+                   && insertedObjects.map(\.imagePNG) == storedObjects.map(\.imagePNG)
+                   && Set(insertedObjects.map(\.id)).isDisjoint(with:storedObjects.map(\.id)),
+                   "Sticker insertion did not preserve separate objects with fresh IDs")
         destinationDoc.state.showStickers = false
         let lockedIDs = Set(exportObjects.map(\.id))
         let lockBitmap = destinationCanvas.bitmapImageRepForCachingDisplay(in:destinationCanvas.bounds)!
