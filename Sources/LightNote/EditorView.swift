@@ -586,6 +586,8 @@ struct StickerLibraryView: View {
     @ObservedObject var library = StickerLibrary.shared
     @Environment(\.dismiss) private var dismiss
     @State private var errorMessage: String?
+    @State private var renamingSticker: StickerLibrary.Sticker?
+    @State private var stickerName = ""
     private func attempt(_ operation: () throws -> Void) {
         do { try operation() } catch { errorMessage = error.localizedDescription }
     }
@@ -657,6 +659,10 @@ struct StickerLibraryView: View {
                             .topTooltip(sticker.name + " · 클릭하여 삽입")
                             .accessibilityLabel(sticker.name + " 스티커 삽입")
                             .contextMenu {
+                                Button("이름 변경…") {
+                                    stickerName = sticker.name
+                                    renamingSticker = sticker
+                                }
                                 Button("스티커 삭제",role:.destructive) { attempt { try library.remove(sticker) } }
                             }
                         }
@@ -664,12 +670,19 @@ struct StickerLibraryView: View {
                 }
             }
             Divider()
-            Text("클릭하여 노트에 넣기 · 우클릭하여 스티커함에서 삭제")
+            Text("클릭하여 노트에 넣기 · 우클릭하여 이름 변경 또는 삭제")
                 .font(.caption).foregroundStyle(.secondary).padding(12)
         }
         .frame(width:640,height:480)
         .background(Color(nsColor:.windowBackgroundColor))
         .onAppear { library.reload(); errorMessage = library.loadError }
+        .alert("스티커 이름 변경",isPresented:Binding(get:{ renamingSticker != nil },set:{ if !$0 { renamingSticker = nil } }),presenting:renamingSticker) { sticker in
+            TextField("이름",text:$stickerName)
+            Button("취소",role:.cancel) {}
+            Button("저장") {
+                attempt { try library.rename(sticker,to:stickerName) }
+            }.disabled(stickerName.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
+        }
         .alert("스티커 오류",isPresented:Binding(get:{errorMessage != nil},set:{if !$0 {errorMessage = nil}})) {
             Button("확인") { errorMessage = nil }
         } message: { Text(errorMessage ?? "") }

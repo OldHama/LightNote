@@ -276,8 +276,7 @@ final class StickerLibrary: ObservableObject {
         guard png.count <= 50_000_000 else {
             throw NSError(domain:"LightNote.Stickers",code:3,userInfo:[NSLocalizedDescriptionKey:"변환한 이미지가 너무 큽니다. 더 작은 이미지를 선택해 주세요."])
         }
-        let title = String(name.trimmingCharacters(in:.whitespacesAndNewlines).prefix(40))
-            .replacingOccurrences(of:"/",with:" ").replacingOccurrences(of:":",with:" ")
+        let title = fileTitle(name)
         try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
         let id = (title.isEmpty ? "스티커" : title) + "__" + UUID().uuidString + ".png"
         let url = directory.appendingPathComponent(id)
@@ -307,6 +306,20 @@ final class StickerLibrary: ObservableObject {
     func data(for sticker: Sticker) throws -> Data {
         guard stickers.contains(where:{$0.id == sticker.id}) else { throw CocoaError(.fileNoSuchFile) }
         return try Data(contentsOf:directory.appendingPathComponent(sticker.id))
+    }
+    private func fileTitle(_ name: String) -> String {
+        return String(name.trimmingCharacters(in:.whitespacesAndNewlines).prefix(40))
+            .replacingOccurrences(of:"/",with:" ").replacingOccurrences(of:":",with:" ")
+    }
+    func rename(_ sticker: Sticker, to name: String) throws {
+        guard stickers.contains(where: { $0.id == sticker.id }) else { throw CocoaError(.fileNoSuchFile) }
+        let title = fileTitle(name)
+        guard !title.isEmpty, title != sticker.name else { return }
+        let source = directory.appendingPathComponent(sticker.id)
+        let id = title + "__" + UUID().uuidString
+        let destination = directory.appendingPathComponent(id).appendingPathExtension(source.pathExtension)
+        try FileManager.default.moveItem(at:source,to:destination)
+        reload()
     }
     func remove(_ sticker: Sticker) throws {
         guard stickers.contains(where:{$0.id == sticker.id}) else { return }
