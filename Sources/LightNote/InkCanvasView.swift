@@ -137,6 +137,14 @@ final class InkCanvasView: NSView {
         }
     }
     private var shapeDraft: ShapeDraft?
+    private struct RotationDrag {
+        let bounds: CGRect
+        let startAngle: CGFloat
+        var transform = CGAffineTransform.identity
+
+        var center: CGPoint { CGPoint(x:bounds.midX,y:bounds.midY) }
+    }
+    private var rotationDrag: RotationDrag?
     private var resizeDrag: ResizeDrag?
     static let inkPasteboardType = NSPasteboard.PasteboardType("com.lightnote.ink-selection")
     private var imageCache: [UUID: NSImage] = [:]
@@ -329,7 +337,7 @@ final class InkCanvasView: NSView {
     }
     private var inputInProgress: Bool {
         active != nil || shapeDraft != nil || activeLaser != nil || erasingLast != nil ||
-        marqueeStart != nil || moveStart != nil || resizeDrag != nil
+        marqueeStart != nil || moveStart != nil || resizeDrag != nil || rotationDrag != nil
     }
     private func updateCommandSelection(_ held: Bool, completed: Bool = false) {
         guard !inputInProgress else { return }
@@ -434,6 +442,10 @@ final class InkCanvasView: NSView {
         }
         if state.tool == .selection {
             let point = convert(event.locationInWindow, from: nil)
+            if !selectionContainsLocked, let rect = selectionBounds, rotationHandle(in:rect).contains(point) {
+                rotationDrag = RotationDrag(bounds:rect,startAngle:atan2(point.y-rect.midY,point.x-rect.midX))
+                return
+            }
             if !selectionContainsLocked, let rect = selectionBounds, let corner = resizeHandles(rect).sorted { hypot($0.x-point.x,$0.y-point.y) < hypot($1.x-point.x,$1.y-point.y) }.first(where: {
                 abs($0.x-point.x) <= handleRadius && abs($0.y-point.y) <= handleRadius &&
                 hypot($0.x-point.x, $0.y-point.y) < hypot(rect.midX-point.x, rect.midY-point.y)
@@ -467,7 +479,7 @@ final class InkCanvasView: NSView {
         if inputInProgress { focusForDrawing() }
         if shapeDraft != nil { updateShape(with: event); return }
         if activeLaser != nil { appendLaser(event); return }
-        if marqueeStart != nil || moveStart != nil || resizeDrag != nil { updateSelection(with: event); return }
+        if marqueeStart != nil || moveStart != nil || resizeDrag != nil || rotationDrag != nil { updateSelection(with: event); return }
         if erasingLast != nil { erase(with: event); return }
         guard active != nil else { return } // Never bridge a disconnected input session.
         append(event)
@@ -485,7 +497,7 @@ final class InkCanvasView: NSView {
             finishLaser()
             return
         }
-        if marqueeStart != nil || moveStart != nil || resizeDrag != nil {
+        if marqueeStart != nil || moveStart != nil || resizeDrag != nil || rotationDrag != nil {
             updateSelection(with: event)
             finishStroke(reason: "selection-up")
             return
@@ -509,7 +521,7 @@ final class InkCanvasView: NSView {
         }
         if shapeDraft != nil { updateShape(with: event); return }
         if activeLaser != nil { appendLaser(event); return }
-        if marqueeStart != nil || moveStart != nil || resizeDrag != nil { updateSelection(with: event); return }
+        if marqueeStart != nil || moveStart != nil || resizeDrag != nil || rotationDrag != nil { updateSelection(with: event); return }
         if erasingLast != nil { erase(with: event); return }
         guard active != nil else { return }
         append(event)
@@ -611,7 +623,7 @@ final class InkCanvasView: NSView {
         }
         context.setAllowsAntialiasing(true); context.setShouldAntialias(true)
         for stroke in strokes {
-            if stroke.tool == "image", let data = stroke.imagePNG, let image = NSImage(data:data), stroke.samples.count == 2 {
+            if stroke.tool == "image", let data = stroke.imagePNG, let image = NSImage(data:data) {
                 context.saveGState()
                 let rect = stroke.orientImage(in:context)
                 image.draw(in:rect,from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
@@ -746,8 +758,15 @@ final class InkCanvasView: NSView {
         handleCorners(rect) + [CGPoint(x:rect.midX,y:rect.minY), CGPoint(x:rect.maxX,y:rect.midY),
                                CGPoint(x:rect.midX,y:rect.maxY), CGPoint(x:rect.minX,y:rect.midY)]
     }
+    private func rotationHandle(in rect: CGRect) -> CGRect {
+        let scale = enclosingScrollView?.magnification ?? 1
+        let radius = 10 / scale
+        let y = max(radius,rect.minY-24/scale)
+        return CGRect(x:rect.midX-radius,y:y-radius,width:2*radius,height:2*radius)
+    }
+
     private var selectionTransform: CGAffineTransform {
-        resizeDrag?.transform ?? CGAffineTransform(translationX: moveDelta.width, y: moveDelta.height)
+        rotationDrag?.transform ?? resizeDrag?.transform ?? CGAffineTransform(translationX: moveDelta.width, y: moveDelta.height)
     }
     private func updateShape(with event: NSEvent) {
         guard shapeDraft != nil else { return }
@@ -873,20 +892,36 @@ final class InkCanvasView: NSView {
     }
     private func clearSelection() {
         if let rect = selectionBounds {
+            setNeedsDisplay(rotationHandle(in:rect).insetBy(dx:-2,dy:-2))
             setNeedsDisplay(rect.union(rect.applying(selectionTransform))
                 .insetBy(dx: -handleRadius*2, dy: -handleRadius*2))
         }
         if let rect = marqueeRect { setNeedsDisplay(rect.insetBy(dx: -3, dy: -3)) }
         selectedIDs.removeAll()
         state.hasSelection = false
-        marqueeStart = nil; marqueeRect = nil; moveStart = nil; moveDelta = .zero; resizeDrag = nil
+        marqueeStart = nil; marqueeRect = nil; moveStart = nil; moveDelta = .zero; resizeDrag = nil; rotationDrag = nil
     }
     private func updateSelection(with event: NSEvent) {
         defer { updateSelectionLockButton() }
         let point = convert(event.locationInWindow, from: nil)
         guard point.x.isFinite, point.y.isFinite else { return }
-        let padding = handleRadius * 2
-        if var resize = resizeDrag {
+        let padding = handleRadius * 6
+        if var rotation = rotationDrag {
+            let dx = point.x-rotation.center.x
+            let dy = point.y-rotation.center.y
+            guard hypot(dx,dy) > 0.001 else { return }
+            let old = rotation.bounds.applying(rotation.transform)
+            let angle = atan2(dy,dx)-rotation.startAngle
+            if abs(angle) < 0.000001 {
+                rotation.transform = .identity
+            } else {
+                rotation.transform = NoteDocument.rotationTransform(angle:angle,center:rotation.center,bounds:rotation.bounds)
+            }
+            rotationDrag = rotation
+            let updated = rotation.bounds.applying(rotation.transform)
+            expandWorkspace(to:NSSize(width:updated.maxX+24,height:updated.maxY+24))
+            setNeedsDisplay(old.union(updated).insetBy(dx:-padding,dy:-padding))
+        } else if var resize = resizeDrag {
             let old = resize.source.applying(resize.transform)
             let minimum = 12 / (enclosingScrollView?.magnification ?? 1)
             resize.target = CGPoint(
@@ -929,6 +964,11 @@ final class InkCanvasView: NSView {
         }
     }
     private func finishSelection() {
+        if let rotation = rotationDrag {
+            rotationDrag = nil
+            state.document?.rotateStrokes(ids:selectedIDs,using:rotation.transform)
+            needsDisplay = true
+        }
         if let resize = resizeDrag {
             resizeDrag = nil
             if resize.target != resize.corner {
@@ -952,7 +992,7 @@ final class InkCanvasView: NSView {
             state.hasSelection = !selectedIDs.isEmpty
             marqueeStart = nil; marqueeRect = nil
             setNeedsDisplay(rect.insetBy(dx: -10, dy: -10))
-            if let selectionBounds { setNeedsDisplay(selectionBounds.insetBy(dx: -3, dy: -3)) }
+            if let selectionBounds { setNeedsDisplay(selectionBounds.insetBy(dx: -handleRadius*6, dy: -handleRadius*6)) }
         }
         if moveStart != nil {
             let delta = moveDelta
@@ -1107,7 +1147,7 @@ final class InkCanvasView: NSView {
                 let image: NSImage?
                 if let cached = imageCache[stroke.id] { image = cached }
                 else { image = stroke.imagePNG.flatMap(NSImage.init(data:)); imageCache[stroke.id] = image }
-                if let image, stroke.samples.count == 2 {
+                if let image {
                     context.saveGState()
                     if selectedIDs.contains(stroke.id) { context.concatenate(selectionTransform) }
                     let rect = stroke.orientImage(in:context)
@@ -1158,6 +1198,21 @@ final class InkCanvasView: NSView {
             if marqueeRect == nil && !selectionContainsLocked {
                 context.setLineDash(phase: 0, lengths: [])
                 context.setFillColor(NSColor.white.cgColor)
+                let handle = rotationHandle(in:rect)
+                context.fillEllipse(in:handle)
+                context.strokeEllipse(in:handle)
+                context.setLineCap(.round)
+                context.setLineJoin(.round)
+                let center = CGPoint(x:handle.midX,y:handle.midY)
+                context.beginPath()
+                context.addArc(center:center,radius:4.3/scale,startAngle:0,endAngle:5.4,clockwise:false)
+                context.strokePath()
+                let tip = CGPoint(x:center.x+2.8/scale,y:center.y-3.3/scale)
+                context.beginPath()
+                context.move(to:CGPoint(x:tip.x-3.3/scale,y:tip.y+0.5/scale))
+                context.addLine(to:tip)
+                context.addLine(to:CGPoint(x:tip.x-0.5/scale,y:tip.y-3.3/scale))
+                context.strokePath()
                 for corner in resizeHandles(rect) {
                     let box = CGRect(x: corner.x-4/scale, y: corner.y-4/scale, width: 8/scale, height: 8/scale)
                     context.fill(box)

@@ -232,7 +232,7 @@ final class NoteLibrary: ObservableObject {
         context.setLineCap(.round); context.setLineJoin(.round)
         for stroke in note.strokes where stroke.bounds.intersects(page) {
             if stroke.tool == "image", let data = stroke.imagePNG, let source = CGImageSourceCreateWithData(data as CFData,nil),
-               let image = CGImageSourceCreateImageAtIndex(source,0,nil), stroke.samples.count == 2 {
+               let image = CGImageSourceCreateImageAtIndex(source,0,nil) {
                 context.saveGState()
                 let rect = stroke.orientImage(in:context)
                 context.translateBy(x:rect.minX,y:rect.maxY)

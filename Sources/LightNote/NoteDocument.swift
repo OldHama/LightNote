@@ -352,19 +352,29 @@ final class NoteDocument: NSDocument {
         let selected = state.note.strokes.filter { ids.contains($0.id) }
         guard !selected.isEmpty, selected.allSatisfy({ !$0.isLocked }) else { return }
         let box = selected.reduce(CGRect.null) { $0.union($1.bounds) }
-        let direction: CGFloat = clockwise ? 1 : -1
-        let x = max(box.midX, box.height / 2)
-        let y = max(box.midY, box.width / 2)
+        let angle = (clockwise ? CGFloat.pi : -CGFloat.pi) / 2
+        let center = CGPoint(x:box.midX,y:box.midY)
+        rotateStrokes(ids:ids, using:Self.rotationTransform(angle:angle,center:center,bounds:box))
+    }
+
+    static func rotationTransform(angle: CGFloat, center: CGPoint, bounds: CGRect) -> CGAffineTransform {
+        var transform = CGAffineTransform(translationX:center.x,y:center.y)
+            .rotated(by:angle).translatedBy(x:-center.x,y:-center.y)
+        let rotated = bounds.applying(transform)
+        transform.tx += max(0,-rotated.minX)
+        transform.ty += max(0,-rotated.minY)
+        return transform
+    }
+
+    func rotateStrokes(ids: Set<UUID>, using transform: CGAffineTransform) {
+        let selected = state.note.strokes.filter { ids.contains($0.id) }
+        guard !transform.isIdentity, !selected.isEmpty, selected.allSatisfy({ !$0.isLocked }) else { return }
         let rotated = selected.map { stroke in
-            var copy = stroke
+            var copy = stroke.imageWithExplicitCorners()
             for index in copy.samples.indices {
-                let point = stroke.samples[index].point
-                copy.samples[index].x = x - direction * (point.y - box.midY)
-                copy.samples[index].y = y + direction * (point.x - box.midX)
-            }
-            if copy.tool == "image" {
-                let turns = ((copy.imageQuarterTurns ?? 0) % 4 + (clockwise ? 1 : 3)) % 4
-                copy.imageQuarterTurns = turns == 0 ? nil : turns
+                let point = copy.samples[index].point.applying(transform)
+                copy.samples[index].x = point.x
+                copy.samples[index].y = point.y
             }
             return copy
         }

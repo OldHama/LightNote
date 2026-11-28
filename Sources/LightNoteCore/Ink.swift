@@ -41,12 +41,50 @@ public struct InkStroke: Codable, Equatable, Sendable, Identifiable {
 
     /// Applies image orientation in a top-down drawing context.
     public func orientImage(in context: CGContext) -> CGRect {
+        if samples.count == 3 {
+            context.concatenate(imageFrame)
+            return CGRect(x:0,y:0,width:1,height:1)
+        }
         let bounds = pointBounds
         let turns = (imageQuarterTurns ?? 0) % 4
         context.translateBy(x: bounds.midX, y: bounds.midY)
         context.rotate(by: CGFloat(turns) * .pi / 2)
         let size = turns.isMultiple(of: 2) ? bounds.size : CGSize(width: bounds.height, height: bounds.width)
         return CGRect(x: -size.width / 2, y: -size.height / 2, width: size.width, height: size.height)
+    }
+    private var imageFrame: CGAffineTransform {
+        let origin = samples[0].point
+        let right = samples[1].point
+        let bottom = samples[2].point
+        return CGAffineTransform(a:right.x-origin.x,b:right.y-origin.y,
+                                 c:bottom.x-origin.x,d:bottom.y-origin.y,tx:origin.x,ty:origin.y)
+    }
+
+    fileprivate var hasValidImageFrame: Bool {
+        switch samples.count {
+        case 2: return pointBounds.width > 0 && pointBounds.height > 0
+        case 3:
+            let frame = imageFrame
+            return abs(frame.a * frame.d - frame.b * frame.c) > 0
+        default: return false
+        }
+    }
+
+    public func imageWithExplicitCorners() -> InkStroke {
+        guard tool == "image", samples.count == 2 else { return self }
+        let bounds = pointBounds
+        let transform = CGAffineTransform(rotationAngle: CGFloat((imageQuarterTurns ?? 0) % 4) * .pi / 2)
+        let turns = imageQuarterTurns ?? 0
+        let width = turns.isMultiple(of:2) ? bounds.width : bounds.height
+        let height = turns.isMultiple(of:2) ? bounds.height : bounds.width
+        var copy = self
+        copy.imageQuarterTurns = nil
+        copy.samples = [CGPoint(x:-width/2,y:-height/2),CGPoint(x:width/2,y:-height/2),
+                        CGPoint(x:-width/2,y:height/2)].map {
+            let point = $0.applying(transform)
+            return InkSample(x:bounds.midX+point.x,y:bounds.midY+point.y,time:samples[0].time)
+        }
+        return copy
     }
     public var samples: [InkSample]
     public init(id: UUID = UUID(), color: InkColor = .black, width: Double = 1,
@@ -86,6 +124,9 @@ public struct InkStroke: Codable, Equatable, Sendable, Identifiable {
     }
 
     public var bounds: CGRect {
+        if tool == "image", samples.count == 3 {
+            return CGRect(x:0,y:0,width:1,height:1).applying(imageFrame)
+        }
         guard let first = samples.first else { return .null }
         var minX = first.x, maxX = first.x, minY = first.y, maxY = first.y
         for p in samples.dropFirst() {
@@ -151,9 +192,7 @@ public struct NoteFile: Codable, Equatable, Sendable {
             if stroke.tool == "image" {
                 guard let data = stroke.imagePNG, data.count <= 50_000_000,
                       data.starts(with: [137, 80, 78, 71, 13, 10, 26, 10]),
-                      stroke.samples.count == 2,
-                      abs(stroke.samples[1].x - stroke.samples[0].x) > 0,
-                      abs(stroke.samples[1].y - stroke.samples[0].y) > 0 else { throw NoteError.invalidData }
+                      stroke.hasValidImageFrame else { throw NoteError.invalidData }
             }
             for c in [stroke.color.red, stroke.color.green, stroke.color.blue, stroke.color.alpha] {
                 guard c.isFinite, (0...1).contains(c) else { throw NoteError.invalidData }
@@ -249,10 +288,8 @@ public final class InkPathBuilder {
         }
         let builder = InkPathBuilder()
         builder.points = stroke.samples.map(\.point)
-        let rect = stroke.pointBounds
-        if stroke.tool == "ellipse" { builder.path.addEllipse(in: rect) }
-        else if stroke.tool == "arrow" { builder.path.addLines(between: builder.points) }
-        else { builder.path.addRect(rect) }
+        builder.path.addLines(between: builder.points)
+        if stroke.tool == "ellipse" || stroke.tool == "rectangle" { builder.path.closeSubpath() }
         return builder
     }
     public static func make(samples: [InkSample]) -> InkPathBuilder {
