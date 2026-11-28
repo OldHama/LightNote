@@ -538,7 +538,26 @@ final class InkCanvasView: NSView {
         let sticker = NSMenuItem(title:"스티커 생성",action:#selector(contextCreateSticker(_:)),keyEquivalent:"")
         sticker.target = self; createMenu.addItem(sticker)
         create.submenu = createMenu; menu.addItem(create)
+        let rotate = NSMenuItem(title:"회전",action:nil,keyEquivalent:"")
+        let rotationMenu = NSMenu()
+        rotationMenu.autoenablesItems = false
+        for (title, direction) in [("오른쪽으로 90°", 1), ("왼쪽으로 90°", -1)] {
+            let item = NSMenuItem(title:title,action:#selector(contextRotate(_:)),keyEquivalent:"")
+            item.target = self
+            item.tag = direction
+            rotationMenu.addItem(item)
+        }
+        rotate.submenu = rotationMenu
+        rotate.isEnabled = !selectionContainsLocked
+        menu.addItem(rotate)
         return menu
+    }
+    @objc private func contextRotate(_ sender: NSMenuItem) {
+        finishStroke(reason:"rotate-selection")
+        state.document?.rotateStrokes(ids:selectedIDs,clockwise:sender.tag > 0)
+        expandWorkspaceToStoredInk()
+        updateSelectionLockButton()
+        needsDisplay = true
     }
     @objc private func contextCopyPNG(_ sender: Any?) { performPNGAction(export:false) }
     @objc private func contextSavePNG(_ sender: Any?) { performPNGAction(export:true) }
@@ -593,9 +612,10 @@ final class InkCanvasView: NSView {
         context.setAllowsAntialiasing(true); context.setShouldAntialias(true)
         for stroke in strokes {
             if stroke.tool == "image", let data = stroke.imagePNG, let image = NSImage(data:data), stroke.samples.count == 2 {
-                let a = stroke.samples[0].point, b = stroke.samples[1].point
-                let rect = CGRect(x:min(a.x,b.x),y:min(a.y,b.y),width:abs(b.x-a.x),height:abs(b.y-a.y))
+                context.saveGState()
+                let rect = stroke.orientImage(in:context)
                 image.draw(in:rect,from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
+                context.restoreGState()
             } else {
                 render(stroke,path:InkPathBuilder.make(stroke:stroke).path,in:context)
             }
@@ -1088,10 +1108,9 @@ final class InkCanvasView: NSView {
                 if let cached = imageCache[stroke.id] { image = cached }
                 else { image = stroke.imagePNG.flatMap(NSImage.init(data:)); imageCache[stroke.id] = image }
                 if let image, stroke.samples.count == 2 {
-                    let a = stroke.samples[0].point, b = stroke.samples[1].point
-                    let rect = CGRect(x: min(a.x,b.x), y: min(a.y,b.y), width: abs(b.x-a.x), height: abs(b.y-a.y))
                     context.saveGState()
                     if selectedIDs.contains(stroke.id) { context.concatenate(selectionTransform) }
+                    let rect = stroke.orientImage(in:context)
                     image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
                     context.restoreGState()
                 }

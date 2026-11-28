@@ -634,7 +634,7 @@ enum AppSelfTest {
                 timestamp:1390,windowNumber:0,context:nil,eventNumber:0,clickCount:1,pressure:0)!
         }
         guard let contextMenu = destinationCanvas.menu(for:contextEvent(CGPoint(x:exportedRect.midX,y:exportedRect.midY))),
-              contextMenu.items.map(\.title) == ["복사","생성"],
+              contextMenu.items.map(\.title) == ["복사","생성","회전"],
               let copyMenu = contextMenu.items[0].submenu,
               let createMenu = contextMenu.items[1].submenu else { throw Failure(message:"Selection context menu missing") }
         try expect(copyMenu.items.map(\.title) == ["PNG 클립보드 복사","PNG 파일 저장…"],"PNG context choices incorrect")

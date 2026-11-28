@@ -233,9 +233,12 @@ final class NoteLibrary: ObservableObject {
         for stroke in note.strokes where stroke.bounds.intersects(page) {
             if stroke.tool == "image", let data = stroke.imagePNG, let source = CGImageSourceCreateWithData(data as CFData,nil),
                let image = CGImageSourceCreateImageAtIndex(source,0,nil), stroke.samples.count == 2 {
-                let a = stroke.samples[0].point, b = stroke.samples[1].point
-                context.saveGState(); context.translateBy(x:min(a.x,b.x),y:max(a.y,b.y)); context.scaleBy(x:1,y:-1)
-                context.draw(image,in:CGRect(x:0,y:0,width:abs(b.x-a.x),height:abs(b.y-a.y))); context.restoreGState()
+                context.saveGState()
+                let rect = stroke.orientImage(in:context)
+                context.translateBy(x:rect.minX,y:rect.maxY)
+                context.scaleBy(x:1,y:-1)
+                context.draw(image,in:CGRect(origin:.zero,size:rect.size))
+                context.restoreGState()
             } else {
                 context.setStrokeColor(stroke.color.cgColor); context.setFillColor(stroke.color.cgColor)
                 context.setLineWidth(max(stroke.width,0.6/scale))

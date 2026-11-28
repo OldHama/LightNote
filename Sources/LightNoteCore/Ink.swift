@@ -37,6 +37,17 @@ public struct InkStroke: Codable, Equatable, Sendable, Identifiable {
     public var locked: Bool? = nil
     public var isLocked: Bool { locked == true }
     public var imagePNG: Data? = nil
+    public var imageQuarterTurns: Int? = nil
+
+    /// Applies image orientation in a top-down drawing context.
+    public func orientImage(in context: CGContext) -> CGRect {
+        let bounds = pointBounds
+        let turns = (imageQuarterTurns ?? 0) % 4
+        context.translateBy(x: bounds.midX, y: bounds.midY)
+        context.rotate(by: CGFloat(turns) * .pi / 2)
+        let size = turns.isMultiple(of: 2) ? bounds.size : CGSize(width: bounds.height, height: bounds.width)
+        return CGRect(x: -size.width / 2, y: -size.height / 2, width: size.width, height: size.height)
+    }
     public var samples: [InkSample]
     public init(id: UUID = UUID(), color: InkColor = .black, width: Double = 1,
                 samples: [InkSample]) {

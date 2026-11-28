@@ -348,6 +348,29 @@ final class NoteDocument: NSDocument {
         guard changed.allSatisfy({ $0.samples.allSatisfy { $0.x.isFinite && $0.y.isFinite && abs($0.x) <= 100000 && abs($0.y) <= 100000 } }) else { return }
         replaceStrokes(changed, actionName: "선택 크기 변경")
     }
+    func rotateStrokes(ids: Set<UUID>, clockwise: Bool) {
+        let selected = state.note.strokes.filter { ids.contains($0.id) }
+        guard !selected.isEmpty, selected.allSatisfy({ !$0.isLocked }) else { return }
+        let box = selected.reduce(CGRect.null) { $0.union($1.bounds) }
+        let direction: CGFloat = clockwise ? 1 : -1
+        let x = max(box.midX, box.height / 2)
+        let y = max(box.midY, box.width / 2)
+        let rotated = selected.map { stroke in
+            var copy = stroke
+            for index in copy.samples.indices {
+                let point = stroke.samples[index].point
+                copy.samples[index].x = x - direction * (point.y - box.midY)
+                copy.samples[index].y = y + direction * (point.x - box.midX)
+            }
+            if copy.tool == "image" {
+                let turns = ((copy.imageQuarterTurns ?? 0) % 4 + (clockwise ? 1 : 3)) % 4
+                copy.imageQuarterTurns = turns == 0 ? nil : turns
+            }
+            return copy
+        }
+        guard (try? NoteFile(strokes: rotated).validate()) != nil else { return }
+        replaceStrokes(rotated, actionName: "객체 회전")
+    }
     func setLocked(ids: Set<UUID>, locked: Bool) {
         let changed = state.note.strokes.filter { ids.contains($0.id) && $0.isLocked != locked }.map { stroke in
             var copy = stroke; copy.locked = locked ? true : nil; return copy
